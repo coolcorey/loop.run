@@ -41,12 +41,18 @@ async function startToday() {
     starting.value = false
   }
 }
+
+/** Blank tracking session — no planned path */
+function startFreeRun() {
+  runs.startRun(null)
+  router.push({ name: 'run', query: { free: '1' } })
+}
 </script>
 
 <template>
   <section>
     <p class="lede" style="margin-top: 0">
-      Plan a loop, run on-route with splits and voice coach, or start today’s training session.
+      Plan a loop for turn-by-turn coaching, or hit Free run to just track.
     </p>
 
     <div class="stack">
@@ -59,22 +65,33 @@ async function startToday() {
       >
         {{ starting ? 'Planning session…' : `Start: ${today.session.title}` }}
       </button>
-      <RouterLink class="btn" :class="today ? 'btn-ghost' : 'btn-primary'" style="display: flex; width: 100%; box-sizing: border-box" to="/plan">
+      <RouterLink
+        class="btn"
+        :class="today ? 'btn-ghost' : 'btn-primary'"
+        style="display: flex; width: 100%; box-sizing: border-box"
+        to="/plan"
+      >
         Plan a loop
       </RouterLink>
       <RouterLink
+        v-if="runs.hasResumableRun && resume"
         class="btn btn-ghost btn-block"
-        :to="runs.hasResumableRun ? { name: 'run', query: { resume: '1' } } : '/run'"
+        :to="{ name: 'run', query: { resume: '1' } }"
       >
-        <template v-if="runs.hasResumableRun && resume">
-          Resume run
-          <span class="muted" style="font-weight: 500">
-            · {{ resume.summary }}
-            · {{ formatDistance(resume.distanceMeters, guest.unit) }}
-          </span>
-        </template>
-        <template v-else>Open run mode</template>
+        Resume run
+        <span class="muted" style="font-weight: 500">
+          · {{ resume.summary }}
+          · {{ formatDistance(resume.distanceMeters, guest.unit) }}
+        </span>
       </RouterLink>
+      <button
+        v-else
+        class="btn btn-ghost btn-block"
+        type="button"
+        @click="startFreeRun"
+      >
+        Free run
+      </button>
     </div>
     <p v-if="sessionError" class="error">{{ sessionError }}</p>
 
@@ -116,7 +133,7 @@ async function startToday() {
       </template>
       <p v-else class="muted small" style="margin: 0">
         No plan yet.
-        <RouterLink to="/plans">Build one</RouterLink>
+        <RouterLink to="/train">Build one</RouterLink>
       </p>
     </div>
 

@@ -8,7 +8,7 @@ const items = [
   { to: '/', label: 'Home', match: ['home'] },
   { to: '/plan', label: 'Plan', match: ['plan-run'] },
   { to: '/run', label: 'Run', match: ['run'] },
-  { to: '/plans', label: 'Plans', match: ['plans'] },
+  { to: '/train', label: 'Train', match: ['train'] },
   { to: '/history', label: 'Log', match: ['history'] },
 ] as const
 

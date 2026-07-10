@@ -13,6 +13,7 @@ const plans = usePlansStore()
 const router = useRouter()
 
 const goalKind = ref<TrainingGoalKind>('race_time')
+const raceId = ref('5k')
 const targetLabel = ref('5k')
 const targetMinutes = ref(28)
 const days = ref(28)
@@ -25,10 +26,61 @@ const error = ref<string | null>(null)
 const expandedId = ref<string | null>(null)
 
 const goalOptions: { value: TrainingGoalKind; label: string }[] = [
-  { value: 'race_time', label: 'Race time (e.g. 5k)' },
+  { value: 'race_time', label: 'Race finish time' },
   { value: 'distance_time', label: 'Distance in time' },
   { value: 'calories_per_run', label: 'Calories per run' },
 ]
+
+/**
+ * Common race / distance goals with solid intermediate defaults
+ * (finish time minutes + plan length). User can edit after picking.
+ */
+const racePresets: {
+  id: string
+  label: string
+  /** default finish time (minutes) for a solid recreational goal */
+  defaultMinutes: number
+  /** suggested plan length */
+  defaultDays: number
+}[] = [
+  { id: '1mi', label: '1 mile', defaultMinutes: 8, defaultDays: 21 },
+  { id: '5k', label: '5K', defaultMinutes: 28, defaultDays: 28 },
+  { id: '8k', label: '8K', defaultMinutes: 45, defaultDays: 35 },
+  { id: '10k', label: '10K', defaultMinutes: 55, defaultDays: 42 },
+  { id: '15k', label: '15K', defaultMinutes: 85, defaultDays: 49 },
+  { id: '10mi', label: '10 mile', defaultMinutes: 95, defaultDays: 49 },
+  { id: 'half', label: 'Half marathon', defaultMinutes: 120, defaultDays: 70 },
+  { id: '30k', label: '30K', defaultMinutes: 180, defaultDays: 77 },
+  { id: 'marathon', label: 'Marathon', defaultMinutes: 255, defaultDays: 112 },
+  { id: '50k', label: '50K ultra', defaultMinutes: 360, defaultDays: 126 },
+  { id: '50mi', label: '50 mile', defaultMinutes: 600, defaultDays: 140 },
+  { id: '100k', label: '100K ultra', defaultMinutes: 840, defaultDays: 154 },
+  { id: '100mi', label: '100 mile', defaultMinutes: 1440, defaultDays: 168 },
+  { id: 'custom', label: 'Custom…', defaultMinutes: 30, defaultDays: 28 },
+]
+
+const showRacePresets = computed(
+  () => goalKind.value === 'race_time' || goalKind.value === 'distance_time',
+)
+
+const isCustomRace = computed(() => raceId.value === 'custom')
+
+function applyRacePreset(id: string) {
+  raceId.value = id
+  const p = racePresets.find((r) => r.id === id)
+  if (!p) return
+  if (id !== 'custom') {
+    targetLabel.value = p.label
+    targetMinutes.value = p.defaultMinutes
+    days.value = Math.min(180, p.defaultDays)
+  }
+}
+
+function onGoalKindChange() {
+  if (goalKind.value === 'calories_per_run') return
+  if (!raceId.value) raceId.value = '5k'
+  applyRacePreset(raceId.value)
+}
 
 const today = computed(() => plans.todaysSession())
 
@@ -43,11 +95,19 @@ async function generate() {
         goalKind.value === 'calories_per_run'
           ? undefined
           : Math.round(targetMinutes.value * 60),
-      days: Math.max(3, Math.min(90, days.value)),
+      days: Math.max(3, Math.min(180, days.value)),
       caloriesPerRun:
         goalKind.value === 'calories_per_run' ? caloriesPerRun.value : undefined,
       unit: guest.unit,
-      notes: notes.value || undefined,
+      notes:
+        [
+          notes.value || null,
+          showRacePresets.value && raceId.value !== 'custom'
+            ? `Race distance preset: ${targetLabel.value}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join('. ') || undefined,
     })
     plans.addPlan(plan)
     expandedId.value = plan.id
@@ -83,7 +143,7 @@ const sorted = computed(() => plans.plans)
 <template>
   <section>
     <p class="lede" style="margin-top: 0">
-      Build a plan, then start today’s session — Loop plans a loop and sets target pace.
+      Build a training plan, then start today’s session — Loop routes a loop and sets target pace.
     </p>
 
     <div v-if="today" class="card stack">
@@ -120,21 +180,36 @@ const sorted = computed(() => plans.plans)
     <div class="card stack">
       <div class="field">
         <label>Goal type</label>
-        <select v-model="goalKind">
+        <select v-model="goalKind" @change="onGoalKindChange">
           <option v-for="o in goalOptions" :key="o.value" :value="o.value">
             {{ o.label }}
           </option>
         </select>
       </div>
 
-      <div class="field">
-        <label>Target label</label>
-        <input v-model="targetLabel" type="text" placeholder="5k / 10 mi / half" />
+      <div v-if="showRacePresets" class="field">
+        <label>Distance / race</label>
+        <select v-model="raceId" @change="applyRacePreset(raceId)">
+          <option v-for="r in racePresets" :key="r.id" :value="r.id">
+            {{ r.label }}
+          </option>
+        </select>
+        <span class="muted small">
+          From 1 mile through 100 milers. Defaults are intermediate recreational goals — tweak time and days below.
+        </span>
+      </div>
+
+      <div v-if="showRacePresets && isCustomRace" class="field">
+        <label>Custom distance label</label>
+        <input v-model="targetLabel" type="text" placeholder="e.g. 12K trail, stadium stairs" />
       </div>
 
       <div v-if="goalKind !== 'calories_per_run'" class="field">
-        <label>Target time (minutes)</label>
+        <label>Target finish time (minutes)</label>
         <input v-model.number="targetMinutes" type="number" min="5" step="1" />
+        <span v-if="targetMinutes >= 60" class="muted small">
+          ≈ {{ Math.floor(targetMinutes / 60) }}h {{ targetMinutes % 60 }}m
+        </span>
       </div>
 
       <div v-else class="field">
@@ -144,7 +219,8 @@ const sorted = computed(() => plans.plans)
 
       <div class="field">
         <label>Days until goal</label>
-        <input v-model.number="days" type="number" min="3" max="90" />
+        <input v-model.number="days" type="number" min="3" max="180" />
+        <span class="muted small">Up to 180 days for longer races.</span>
       </div>
 
       <div class="field">
@@ -160,7 +236,7 @@ const sorted = computed(() => plans.plans)
     <p v-if="error" class="error">{{ error }}</p>
 
     <div v-if="sorted.length" class="card">
-      <div class="card-title">Your plans</div>
+      <div class="card-title">Your training</div>
       <div
         v-for="plan in sorted"
         :key="plan.id"
@@ -231,6 +307,6 @@ const sorted = computed(() => plans.plans)
         </div>
       </div>
     </div>
-    <p v-else class="empty">No plans yet. Generate one above.</p>
+    <p v-else class="empty">No training plans yet. Generate one above.</p>
   </section>
 </template>

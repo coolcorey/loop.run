@@ -193,7 +193,7 @@ app.post('/api/ai/training-plan', async (c) => {
       )
     }
 
-    const days = Math.max(3, Math.min(90, Number(body.days) || 28))
+    const days = Math.max(3, Math.min(180, Number(body.days) || 28))
     const raw = await xaiChat({
       system: `You are an expert running coach building progressive training plans for Loop.
 Reply with JSON only matching:

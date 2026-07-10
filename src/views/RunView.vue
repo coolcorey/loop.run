@@ -36,6 +36,7 @@ const vueRoute = useRoute()
 
 const watching = ref(false)
 const tracking = ref(false)
+const nudging = ref(false)
 const error = ref<string | null>(null)
 const lastPoint = ref<GeoPoint | null>(null)
 /** Smoothed travel direction for map heading-up */
@@ -163,13 +164,16 @@ function coachPhase(p: number): CoachContext['phase'] {
   return 'steady'
 }
 
-async function requestNudge() {
+async function requestNudge(opts: { manual?: boolean } = {}) {
   if (!run.value || !tracking.value) return
+  if (nudging.value) return
+
   if (run.value.offRoute) {
     speakCoach('You are off the path. Head back to the route.')
     return
   }
 
+  nudging.value = true
   const ctx: CoachContext = {
     speedMps: lastPoint.value?.speed ?? run.value.avgSpeedMps,
     targetSpeedMps: run.value.targetSpeedMps,
@@ -186,7 +190,11 @@ async function requestNudge() {
     runs.addNudge(nudge)
     speakCoach(nudge.message)
   } catch {
-    // best-effort
+    if (opts.manual) {
+      error.value = 'Coach is busy — try again in a moment.'
+    }
+  } finally {
+    nudging.value = false
   }
 }
 
@@ -273,24 +281,34 @@ async function beginTracking(opts: { resumed?: boolean } = {}) {
   }
 }
 
-async function start(opts: { forceNew?: boolean } = {}) {
+async function start(opts: { forceNew?: boolean; free?: boolean } = {}) {
   unlockSpeech()
   warmVoices()
 
   const existing = runs.activeRun
+  const freeIntent = Boolean(opts.free || vueRoute.query.free === '1')
+  const existingFree =
+    Boolean(existing && !existing.finishedAt && existing.routeId == null)
+  const existingPlanned =
+    Boolean(existing && !existing.finishedAt && existing.routeId != null)
+
+  // Resume free run, or resume planned run (not when forcing free)
   const canResume =
     !opts.forceNew &&
-    existing &&
-    !existing.finishedAt &&
-    runs.prepareResume()
+    ((existingFree && (freeIntent || !runs.activeRoute)) ||
+      (existingPlanned && !freeIntent && runs.prepareResume()))
 
   if (!canResume) {
-    runs.startRun(runs.activeRoute, {
-      targetSpeedMps: existing?.targetSpeedMps ?? null,
-      planId: existing?.planId ?? null,
-      planDay: existing?.planDay ?? null,
-      sessionTitle: existing?.sessionTitle ?? null,
-    })
+    if (freeIntent || !runs.activeRoute) {
+      runs.startRun(null)
+    } else {
+      runs.startRun(runs.activeRoute, {
+        targetSpeedMps: existing?.targetSpeedMps ?? null,
+        planId: existing?.planId ?? null,
+        planDay: existing?.planDay ?? null,
+        sessionTitle: existing?.sessionTitle ?? null,
+      })
+    }
   }
 
   lastSpokenTurnKey.value = null
@@ -298,13 +316,16 @@ async function start(opts: { forceNew?: boolean } = {}) {
   lastOffRouteSpoken.value = false
   await beginTracking({ resumed: Boolean(canResume) })
   if (guest.profile.voiceEnabled) {
+    const free = runs.isFreeRun
     const sessionBit = run.value?.sessionTitle
       ? `${run.value.sessionTitle}. `
       : ''
     speak(
       canResume
         ? 'Resuming run.'
-        : `${sessionBit}Loop started. Let’s go.`,
+        : free
+          ? 'Free run started.'
+          : `${sessionBit}Loop started. Let’s go.`,
       voiceOpts(),
     )
   }
@@ -398,12 +419,20 @@ onMounted(() => {
   runs.sanitizeActiveRun()
 
   const wantResume = vueRoute.query.resume === '1'
+  const wantFree = vueRoute.query.free === '1'
   if (wantResume) {
     if (runs.prepareResume()) {
       void start({ forceNew: false })
     } else {
       error.value =
-        'Nothing to resume — that run’s route is gone. Plan a loop and start fresh.'
+        'Nothing to resume — that run’s route is gone. Plan a loop or start a free run.'
+    }
+  } else if (wantFree) {
+    // Home "Free run" already created the run — just start tracking
+    if (runs.activeRun?.routeId == null) {
+      void start({ forceNew: false, free: true })
+    } else {
+      void start({ forceNew: true, free: true })
     }
   }
 })
@@ -421,8 +450,7 @@ onBeforeUnmount(() => {
     <!-- Map first, max space -->
     <div class="run-map-wrap">
       <RouteMap
-        v-if="route"
-        :path="route.path"
+        :path="route?.path ?? []"
         :user="lastPoint"
         :trail="trailSamples"
         :heading="mapHeading"
@@ -431,12 +459,6 @@ onBeforeUnmount(() => {
         high-contrast-path
         height="min(52dvh, 420px)"
       />
-      <div v-else class="run-map-empty">
-        <p class="muted small" style="margin: 0">
-          No route yet.
-          <RouterLink to="/plan">Plan a loop</RouterLink>
-        </p>
-      </div>
       <div class="run-map-overlay">
         <div class="seg">
           <button type="button" :class="{ active: headingUp }" @click="headingUp = true">
@@ -451,10 +473,15 @@ onBeforeUnmount(() => {
 
     <div class="run-body">
       <p class="muted small run-meta" style="margin: 0">
-        <template v-if="route">{{ route.summary }} · </template>
-        <template v-if="run?.sessionTitle">{{ run.sessionTitle }} · </template>
-        <span v-if="run?.offRoute" class="error">Off route</span>
-        <span v-else-if="tracking" class="success">On route</span>
+        <template v-if="runs.isFreeRun">Free run</template>
+        <template v-else-if="route">{{ route.summary }}</template>
+        <template v-else>No route</template>
+        <template v-if="run?.sessionTitle"> · {{ run.sessionTitle }}</template>
+        <template v-if="route && tracking">
+          ·
+          <span v-if="run?.offRoute" class="error">Off route</span>
+          <span v-else class="success">On route</span>
+        </template>
         <template v-if="liveSpeedLabel">
           ·
           <span :style="{ color: speedToColor(liveSpeedMps) }">{{ liveSpeedLabel }}</span>
@@ -491,9 +518,14 @@ onBeforeUnmount(() => {
             <div class="stat-value">{{ formatPace(paceSeconds) }}</div>
           </div>
           <div class="stat">
-            <div class="stat-label">Left</div>
+            <div class="stat-label">{{ route ? 'Left' : 'kcal' }}</div>
             <div class="stat-value">
-              {{ route ? formatDistance(remaining, guest.unit) : '—' }}
+              <template v-if="route">
+                {{ formatDistance(remaining, guest.unit) }}
+              </template>
+              <template v-else>
+                {{ run?.estimatedCalories ?? 0 }}
+              </template>
             </div>
           </div>
         </div>
@@ -502,6 +534,9 @@ onBeforeUnmount(() => {
           <template v-if="targetPaceDisplay">
             · target {{ targetPaceDisplay }}/{{ guest.unit }}
           </template>
+        </div>
+        <div v-else class="muted small" style="margin-top: 0.5rem">
+          No path plan — recording free track
         </div>
       </div>
 
@@ -560,13 +595,18 @@ onBeforeUnmount(() => {
           v-if="!run || !runs.runMatchesRoute"
           class="btn btn-primary btn-block"
           type="button"
-          @click="start({ forceNew: true })"
+          @click="start({ forceNew: true, free: !route })"
         >
-          Start run
+          {{ route ? 'Start run' : 'Start free run' }}
         </button>
         <template v-else-if="tracking">
-          <button class="btn btn-ghost btn-block" type="button" @click="requestNudge">
-            Nudge me
+          <button
+            class="btn btn-ghost btn-block"
+            type="button"
+            :disabled="nudging"
+            @click="requestNudge({ manual: true })"
+          >
+            {{ nudging ? 'Coaching…' : 'Nudge me' }}
           </button>
           <button class="btn btn-primary btn-block" type="button" @click="finish(false)">
             Finish &amp; save

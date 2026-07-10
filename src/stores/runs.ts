@@ -151,20 +151,28 @@ export const useRunsStore = defineStore('runs', () => {
     }
   })
 
+  /** Free run (no plan) or active run matches the planned route on screen */
   const runMatchesRoute = computed(() => {
     const run = activeRun.value
-    const route = activeRoute.value
     if (!run || run.finishedAt) return false
-    if (run.routeId == null) return !route
-    return route?.id === run.routeId
+    if (run.routeId == null) return true // free run
+    return activeRoute.value?.id === run.routeId
   })
 
-  /** Prefer along-route distance when on a planned path */
+  const isFreeRun = computed(
+    () => Boolean(activeRun.value && activeRun.value.routeId == null),
+  )
+
+  /** Prefer along-route distance when on a planned path; GPS distance for free runs */
   const trackedDistanceMeters = computed(() => {
     if (!runMatchesRoute.value || !activeRun.value) return 0
     const run = activeRun.value
     const route = activeRoute.value
-    if (route?.path?.length && run.alongRouteMeters > 0) {
+    if (
+      run.routeId != null &&
+      route?.path?.length &&
+      run.alongRouteMeters > 0
+    ) {
       return run.alongRouteMeters
     }
     return run.distanceMeters
@@ -232,6 +240,7 @@ export const useRunsStore = defineStore('runs', () => {
   function startRun(route: PlannedRoute | null, options: StartRunOptions = {}) {
     justFinishedLoop.value = false
     liveDistanceToPath.value = null
+    const free = route == null
     const log: RunLog = {
       id: uid('run'),
       routeId: route?.id ?? null,
@@ -252,10 +261,10 @@ export const useRunsStore = defineStore('runs', () => {
       loopCompleted: false,
       offRoute: false,
       splits: [],
-      targetSpeedMps: options.targetSpeedMps ?? null,
-      planId: options.planId ?? null,
-      planDay: options.planDay ?? null,
-      sessionTitle: options.sessionTitle ?? null,
+      targetSpeedMps: free ? null : (options.targetSpeedMps ?? null),
+      planId: free ? null : (options.planId ?? null),
+      planDay: free ? null : (options.planDay ?? null),
+      sessionTitle: free ? null : (options.sessionTitle ?? null),
     }
     if (route) {
       routes.value = [route, ...routes.value.filter((r) => r.id !== route.id)].slice(
@@ -263,6 +272,9 @@ export const useRunsStore = defineStore('runs', () => {
         30,
       )
       activeRoute.value = route
+    } else {
+      // Blank free run — no planned path
+      activeRoute.value = null
     }
     activeRun.value = log
     latestNudge.value = null
@@ -450,6 +462,7 @@ export const useRunsStore = defineStore('runs', () => {
     hasResumableRun,
     resumableSummary,
     runMatchesRoute,
+    isFreeRun,
     trackedDistanceMeters,
     routeProgress,
     remainingMeters,

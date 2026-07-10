@@ -16,11 +16,13 @@ const router = createRouter({
       meta: { title: 'Plan a run' },
     },
     {
-      path: '/plans',
-      name: 'plans',
+      path: '/train',
+      name: 'train',
       component: () => import('@/views/PlansView.vue'),
-      meta: { title: 'Training plans' },
+      meta: { title: 'Train' },
     },
+    // Old path
+    { path: '/plans', redirect: '/train' },
     {
       path: '/run',
       name: 'run',

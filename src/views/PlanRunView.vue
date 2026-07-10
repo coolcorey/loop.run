@@ -364,7 +364,7 @@ function startFavorite(fav: PlannedRoute) {
             Unsave
           </button>
         </div>
-        <RouterLink class="btn btn-ghost btn-block" to="/run">Open run mode</RouterLink>
+        <RouterLink class="btn btn-ghost btn-block" to="/">Back home</RouterLink>
       </div>
     </div>
 
