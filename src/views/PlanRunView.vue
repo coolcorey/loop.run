@@ -208,8 +208,8 @@ function startFavorite(fav: PlannedRoute) {
   <section>
     <h1>Plan a loop</h1>
     <p class="lede">
-      Closed path on real roads back to where you start. Generate another if you
-      don’t like it, or save keepers to favorites.
+      Pick a distance or calorie goal. We’ll build a loop from where you are and
+      bring you back. Don’t like it? Generate another, or save ones you do.
     </p>
 
     <div class="card stack">
@@ -268,18 +268,18 @@ function startFavorite(fav: PlannedRoute) {
       <p class="gps-status small" :class="locationOk ? 'success' : 'muted'">
         <template v-if="locationOk && originPoint">
           <span class="gps-dot ok" aria-hidden="true" />
-          Location ready
+          GPS on
           <template v-if="originPoint.accuracy != null">
             · ±{{ Math.round(originPoint.accuracy) }}m
           </template>
         </template>
         <template v-else-if="locating">
           <span class="gps-dot pulse" aria-hidden="true" />
-          Finding location…
+          Getting GPS…
         </template>
         <template v-else>
           <span class="gps-dot" aria-hidden="true" />
-          Location pending — will request when you plan
+          No GPS yet
         </template>
       </p>
     </div>

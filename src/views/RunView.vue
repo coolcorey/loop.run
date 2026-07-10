@@ -26,6 +26,7 @@ import {
 import { useGuestStore } from '@/stores/guest'
 import { usePlansStore } from '@/stores/plans'
 import { useRunsStore } from '@/stores/runs'
+import { resolveHeading } from '@/services/bearing'
 import type { CoachContext, GeoPoint } from '@/types'
 
 const guest = useGuestStore()
@@ -37,6 +38,10 @@ const watching = ref(false)
 const tracking = ref(false)
 const error = ref<string | null>(null)
 const lastPoint = ref<GeoPoint | null>(null)
+/** Smoothed travel direction for map heading-up */
+const mapHeading = ref<number | null>(null)
+/** Heading-up (course up) vs north-up */
+const headingUp = ref(true)
 const wakeSupported = isWakeLockSupported()
 const wakeActive = ref(false)
 const lastSplitCount = ref(0)
@@ -159,6 +164,7 @@ async function requestNudge() {
 }
 
 function onPosition(pos: GeolocationPosition) {
+  const prev = lastPoint.value
   const point: GeoPoint = {
     lat: pos.coords.latitude,
     lng: pos.coords.longitude,
@@ -167,6 +173,19 @@ function onPosition(pos: GeolocationPosition) {
     speed: pos.coords.speed ?? undefined,
     heading: pos.coords.heading ?? undefined,
     timestamp: pos.timestamp,
+  }
+  const h = resolveHeading(point, prev)
+  if (h != null) {
+    // Light smoothing so the map doesn't twitch
+    if (mapHeading.value == null) {
+      mapHeading.value = h
+    } else {
+      const prevH = mapHeading.value
+      let delta = h - prevH
+      if (delta > 180) delta -= 360
+      if (delta < -180) delta += 360
+      mapHeading.value = (prevH + delta * 0.35 + 360) % 360
+    }
   }
   lastPoint.value = point
   runs.appendSample(point)
@@ -393,7 +412,36 @@ onBeforeUnmount(() => {
         {{ formatDistance(route.distanceMeters, guest.unit) }}
         · ~{{ route.estimatedCalories }} kcal
       </p>
-      <RouteMap :path="route.path" :user="lastPoint" height="220px" />
+      <RouteMap
+        :path="route.path"
+        :user="lastPoint"
+        :heading="mapHeading"
+        :heading-up="headingUp"
+        mode="follow"
+        height="260px"
+      />
+      <div class="row" style="margin-top: 0.55rem; justify-content: space-between">
+        <span class="muted small">Map orientation</span>
+        <div class="seg">
+          <button
+            type="button"
+            :class="{ active: headingUp }"
+            @click="headingUp = true"
+          >
+            Heading up
+          </button>
+          <button
+            type="button"
+            :class="{ active: !headingUp }"
+            @click="headingUp = false"
+          >
+            North up
+          </button>
+        </div>
+      </div>
+      <p v-if="mapHeading != null" class="muted small" style="margin: 0.35rem 0 0">
+        Bearing {{ Math.round(mapHeading) }}°
+      </p>
     </div>
     <div v-else class="card">
       <p class="muted small" style="margin: 0">
