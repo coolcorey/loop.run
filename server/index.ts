@@ -201,6 +201,7 @@ app.post('/api/route/loop', async (c) => {
           : `Routed via ${loop.provider.toUpperCase()}.`),
       provider: loop.provider,
       durationSeconds: loop.durationSeconds,
+      outAndBack: loop.outAndBack,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Route planning failed'

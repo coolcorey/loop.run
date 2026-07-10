@@ -54,28 +54,28 @@ export function destinationPoint(
 
 /**
  * Waypoints for a closed loop of ~target meters.
- * Roads stretch the path, so radius starts below circumference ideal.
- */
-/**
- * Waypoints for a closed loop of ~target meters.
- * Even angular spacing around a ring (not a line out-and-back).
- * Roads stretch the path, so radius starts below circumference ideal.
+ * Places origin ON a ring (not at the center) so via-points force a circuit
+ * instead of a star that routers collapse into out-and-back corridors.
  */
 export function loopWaypoints(
   origin: Point,
   targetMeters: number,
-  count = 6,
+  count = 8,
   radiusScale = 0.72,
   startBearing = 15,
 ): Point[] {
+  const n = Math.max(4, Math.min(14, Math.round(count)))
   const radius = (targetMeters / (2 * Math.PI)) * radiusScale
+  // Center of the circle: opposite the first leg so `origin` sits on the circumference
+  const center = destinationPoint(origin, radius, startBearing + 180)
   const points: Point[] = [origin]
-  // Even pie slices — never collinear reverse
-  for (let i = 1; i <= count; i++) {
-    const bearing = startBearing + (360 * i) / (count + 1)
-    // Slight radius jitter so the router is less likely to collapse to a corridor
-    const r = radius * (0.92 + 0.12 * Math.sin(i * 1.7))
-    points.push(destinationPoint(origin, r, bearing))
+  // Walk around the ring; skip i=0 (origin already placed)
+  for (let i = 1; i < n; i++) {
+    // Bearing of origin from center is `startBearing`
+    const bearingFromCenter = startBearing + (360 * i) / n
+    // Mild radius wobble keeps routers from snapping every via to one arterial
+    const r = radius * (0.9 + 0.14 * Math.sin(i * 2.3 + startBearing * 0.01))
+    points.push(destinationPoint(center, r, bearingFromCenter))
   }
   points.push(origin)
   return points
@@ -99,13 +99,12 @@ function angleDiff(a: number, b: number): number {
 }
 
 /**
- * Score how much the path doubles back (higher = worse).
- * Samples successive path headings; sharp reversals (~>150°) look like out-and-backs.
+ * Score how much the path doubles back via heading reversals (higher = worse).
+ * Catches sharp U-turns; misses "same street later" — use corridorReuseScore too.
  */
 export function doubleBackScore(path: Point[]): number {
   if (path.length < 6) return 0
-  // Sample every Nth vertex for speed
-  const step = Math.max(1, Math.floor(path.length / 40))
+  const step = Math.max(1, Math.floor(path.length / 50))
   let reversals = 0
   let samples = 0
   let prevBearing: number | null = null
@@ -113,12 +112,89 @@ export function doubleBackScore(path: Point[]): number {
     const b = bearingDeg(path[i - step], path[i])
     if (prevBearing != null) {
       samples++
-      if (angleDiff(prevBearing, b) > 150) reversals++
+      if (angleDiff(prevBearing, b) > 145) reversals++
     }
     prevBearing = b
   }
   if (samples === 0) return 0
   return reversals / samples
+}
+
+/**
+ * Fraction of path samples that pass near an earlier/later stretch of the same
+ * route (classic out-and-back: go down a road, return the same way).
+ * 0 = clean circuit, 1 = entire path is a double-traced corridor.
+ */
+export function corridorReuseScore(
+  path: Point[],
+  opts?: { sampleEveryM?: number; minAlongM?: number; nearM?: number },
+): number {
+  if (path.length < 8) return 0
+  const sampleEveryM = opts?.sampleEveryM ?? 45
+  const minAlongM = opts?.minAlongM ?? 160
+  const nearM = opts?.nearM ?? 42
+
+  const samples: { p: Point; d: number }[] = [{ p: path[0]!, d: 0 }]
+  let acc = 0
+  for (let i = 1; i < path.length; i++) {
+    acc += haversineMeters(path[i - 1]!, path[i]!)
+    const last = samples[samples.length - 1]!
+    if (acc - last.d >= sampleEveryM) {
+      samples.push({ p: path[i]!, d: acc })
+    }
+  }
+  if (samples.length < 6) return 0
+
+  let bad = 0
+  for (let i = 0; i < samples.length; i++) {
+    const a = samples[i]!
+    let hit = false
+    for (let j = 0; j < samples.length; j++) {
+      if (Math.abs(samples[j]!.d - a.d) < minAlongM) continue
+      if (haversineMeters(a.p, samples[j]!.p) < nearM) {
+        hit = true
+        break
+      }
+    }
+    if (hit) bad++
+  }
+  return bad / samples.length
+}
+
+/**
+ * How well the path surrounds its centroid (0 = full angular coverage, 1 = thin corridor).
+ * Out-and-backs leave most compass sectors empty.
+ */
+export function angularThinnessScore(path: Point[], bins = 12): number {
+  if (path.length < 8) return 1
+  let lat = 0
+  let lng = 0
+  const step = Math.max(1, Math.floor(path.length / 60))
+  let n = 0
+  for (let i = 0; i < path.length; i += step) {
+    lat += path[i]!.lat
+    lng += path[i]!.lng
+    n++
+  }
+  const center = { lat: lat / n, lng: lng / n }
+  const occupied = new Array<boolean>(bins).fill(false)
+  for (let i = 0; i < path.length; i += step) {
+    const b = bearingDeg(center, path[i]!)
+    occupied[Math.floor(b / (360 / bins)) % bins] = true
+  }
+  const filled = occupied.filter(Boolean).length
+  return 1 - filled / bins
+}
+
+/**
+ * Combined "how out-and-back is this?" score (higher = worse). ~0 good, ~1+ bad.
+ */
+export function outAndBackScore(path: Point[]): number {
+  const reverse = doubleBackScore(path)
+  const reuse = corridorReuseScore(path)
+  const thin = angularThinnessScore(path)
+  // Reuse dominates — that's the "same road twice" problem runners hate
+  return reuse * 3.2 + reverse * 1.2 + thin * 1.4
 }
 
 export function estimateCalories(distanceMeters: number, weightKg: number): number {

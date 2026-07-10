@@ -86,4 +86,4 @@ Prefer **local templates** for high-frequency cues (splits, milestones); reserve
 
 ## Routing quality (related)
 
-Loop planning should prefer **true loops** and **avoid out-and-back / doubling back** on the same road. See server routing + plan preferences.
+Loop planning should prefer **true loops** and **avoid out-and-back / doubling back** on the same road. Server scoring uses corridor reuse (same street later), heading reversals, and angular thinness; waypoints sit on a ring with the start on the circumference (not a star from the origin).

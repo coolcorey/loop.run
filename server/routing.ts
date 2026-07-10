@@ -1,8 +1,8 @@
 import {
-  doubleBackScore,
   estimateCalories,
   haversineMeters,
   loopWaypoints,
+  outAndBackScore,
   pathLengthMeters,
   type Point,
 } from './geo.js'
@@ -22,6 +22,8 @@ export interface RoutedLoop {
   turns: RouteTurn[]
   provider: 'osrm' | 'ors' | 'mock'
   durationSeconds?: number
+  /** 0 good circuit … higher = more out-and-back */
+  outAndBack?: number
 }
 
 interface OsrmStep {
@@ -51,9 +53,10 @@ async function routeOsrm(points: Point[]): Promise<{
   const base =
     env('OSRM_URL', 'https://router.project-osrm.org') ||
     'https://router.project-osrm.org'
+  // continue_straight=false lets the foot router leave a corridor for ring vias
   const url =
     `${base.replace(/\/$/, '')}/route/v1/foot/${coordsParam(points)}` +
-    `?overview=full&geometries=geojson&steps=true&continue_straight=true`
+    `?overview=full&geometries=geojson&steps=true&continue_straight=false`
 
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -93,6 +96,8 @@ async function routeOrs(points: Point[]): Promise<{
     coordinates: points.map((p) => [p.lng, p.lat]),
     instructions: true,
     elevation: false,
+    // Prefer a "rounder" walk when the graph allows (not pure shortest)
+    preference: 'recommended' as const,
     // Foot profile already excludes motorways. avoid_features "highways" is
     // driving-only on public ORS; use foot-safe avoids instead.
     options: {
@@ -175,6 +180,7 @@ function mockGeometricLoop(origin: Point, distanceMeters: number): RoutedLoop {
     estimatedCalories: 0,
     turns: [],
     provider: 'mock',
+    outAndBack: 0,
   }
 }
 
@@ -230,6 +236,26 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
+async function routeThrough(
+  wps: Point[],
+): Promise<{
+  path: Point[]
+  distance: number
+  duration: number
+  steps: OsrmStep[]
+  provider: RoutedLoop['provider']
+} | null> {
+  const ors = await routeOrs(wps).catch(() => null)
+  if (ors) return { ...ors, provider: 'ors' }
+  const osrm = await routeOsrm(wps).catch(() => null)
+  if (osrm) return { ...osrm, provider: 'osrm' }
+  return null
+}
+
+/**
+ * Plan a true road loop. Tries many ring geometries and picks the candidate
+ * with the best distance fit *and* lowest out-and-back (corridor reuse) score.
+ */
 export async function planRoadLoop(input: {
   origin: Point
   distanceMeters: number
@@ -237,30 +263,32 @@ export async function planRoadLoop(input: {
   turnAnnounceMeters: number
   startBearing?: number
 }): Promise<RoutedLoop> {
-  let target = Math.min(Math.max(input.distanceMeters, 400), 42_195)
-  let radiusScale = 0.68
+  const target = Math.min(Math.max(input.distanceMeters, 400), 42_195)
+  let radiusScale = 0.78
   let best: RoutedLoop | null = null
   let bestScore = Infinity
-  let provider: RoutedLoop['provider'] = 'osrm'
+  let bestAcceptable: RoutedLoop | null = null
+  let bestAcceptableScore = Infinity
 
-  // More attempts + more ring waypoints reduce out-and-back corridors
-  for (let attempt = 0; attempt < 6; attempt++) {
-    const bearing = (input.startBearing ?? 20) + attempt * 37
-    const wpCount = 6 + (attempt % 2) // 6 or 7 around the ring
+  const baseBearing = input.startBearing ?? 20
+  // More / varied attempts — geometry matters more than a single bearing
+  const attempts = 10
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const bearing = (baseBearing + attempt * 29 + (attempt % 3) * 11) % 360
+    // denser rings for longer runs
+    const wpCount =
+      target > 5000 ? 9 + (attempt % 3) : target > 2500 ? 7 + (attempt % 3) : 6 + (attempt % 3)
+
     const wps = loopWaypoints(input.origin, target, wpCount, radiusScale, bearing)
-
-    let routed = await routeOrs(wps).catch(() => null)
-    if (routed) {
-      provider = 'ors'
-    } else {
-      routed = await routeOsrm(wps).catch(() => null)
-      if (routed) provider = 'osrm'
-    }
-
-    if (!routed || routed.path.length < 4) {
+    const routed = await routeThrough(wps)
+    if (!routed || routed.path.length < 8) {
+      // shrink/grow radius even on failure
+      radiusScale = Math.min(Math.max(radiusScale * 0.95, 0.35), 1.25)
       continue
     }
 
+    const oab = outAndBackScore(routed.path)
     const turns = stepsToTurns(
       routed.path,
       routed.steps,
@@ -271,29 +299,42 @@ export async function planRoadLoop(input: {
       distanceMeters: routed.distance,
       estimatedCalories: estimateCalories(routed.distance, input.weightKg),
       turns,
-      provider,
+      provider: routed.provider,
       durationSeconds: routed.duration,
+      outAndBack: oab,
     }
 
     const ratio = routed.distance / target
     const distPenalty = Math.abs(1 - ratio)
-    const reversePenalty = doubleBackScore(routed.path) * 2.5
-    const score = distPenalty + reversePenalty
+    // Out-and-back is expensive — prefer a slightly wrong distance over a corridor
+    const score = distPenalty * 0.9 + oab * 2.4
 
     if (score < bestScore) {
       bestScore = score
       best = loop
     }
 
-    // Accept good distance AND low doubling-back
-    if (ratio >= 0.88 && ratio <= 1.12 && reversePenalty < 0.35) {
+    const distanceOk = ratio >= 0.82 && ratio <= 1.2
+    const circuitOk = oab < 0.28
+    if (distanceOk && circuitOk && score < bestAcceptableScore) {
+      bestAcceptableScore = score
+      bestAcceptable = loop
+    }
+
+    // Early exit on a clear win
+    if (ratio >= 0.9 && ratio <= 1.1 && oab < 0.16) {
       return loop
     }
-    // Adjust radius for next attempt (road networks often lengthen geometry)
-    radiusScale *= (target / Math.max(routed.distance, 1)) ** 0.9
-    radiusScale = Math.min(Math.max(radiusScale, 0.28), 1.2)
+
+    // Nudge radius toward target distance for next try
+    radiusScale *= (target / Math.max(routed.distance, 1)) ** 0.85
+    // If heavily out-and-back, open the ring wider next time
+    if (oab > 0.35) radiusScale *= 1.08
+    radiusScale = Math.min(Math.max(radiusScale, 0.35), 1.3)
   }
 
+  // Prefer an acceptable circuit over the pure best distance score
+  if (bestAcceptable) return bestAcceptable
   if (best) return best
 
   const mock = mockGeometricLoop(input.origin, target)
