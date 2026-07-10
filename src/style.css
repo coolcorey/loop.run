@@ -406,3 +406,41 @@ code {
   border-radius: 4px;
 }
 
+.gps-status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.15rem 0 0;
+  justify-content: center;
+}
+
+.gps-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.gps-dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent);
+}
+
+.gps-dot.pulse {
+  background: var(--accent);
+  animation: gps-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gps-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+

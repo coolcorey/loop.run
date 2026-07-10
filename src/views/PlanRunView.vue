@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import RouteMap from '@/components/RouteMap.vue'
 import { ai } from '@/services/ai'
@@ -49,7 +49,6 @@ async function acquireOrigin(force = false): Promise<GeoPoint> {
   locating.value = true
   locationHint.value = null
   try {
-    // forceFresh only when user taps "Use my location" or first plan
     const origin = await getCurrentPosition({
       maxWaitMs: 12_000,
       forceFresh: force,
@@ -76,16 +75,29 @@ async function acquireOrigin(force = false): Promise<GeoPoint> {
   }
 }
 
-async function onUseMyLocation() {
-  error.value = null
-  success.value = null
+/** Quiet background fix so Plan can show GPS status without a button */
+async function warmLocation() {
+  if (!isSecureGeoContext()) return
+  locating.value = true
   try {
-    await acquireOrigin(true)
-    success.value = 'Location fixed.'
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Location failed'
+    const origin = await getCurrentPosition({
+      maxWaitMs: 12_000,
+      forceFresh: false,
+    })
+    originPoint.value = origin
+    locationOk.value = true
+    locationHint.value = null
+  } catch {
+    // Leave subtle "waiting" state; plan() will retry / fall back
+    locationOk.value = false
+  } finally {
+    locating.value = false
   }
 }
+
+onMounted(() => {
+  void warmLocation()
+})
 
 function nextBearing(regenerate: boolean): number {
   if (!regenerate || lastBearing.value == null) {
@@ -244,28 +256,6 @@ function startFavorite(fav: PlannedRoute) {
         />
       </div>
 
-      <div class="row" style="align-items: flex-start">
-        <button
-          class="btn btn-ghost"
-          type="button"
-          style="flex: 1"
-          :disabled="locating || loading"
-          @click="onUseMyLocation"
-        >
-          {{ locating ? 'Locating…' : 'Use my location' }}
-        </button>
-        <span
-          class="small"
-          :class="locationOk ? 'success' : 'muted'"
-          style="flex: 1; padding-top: 0.5rem"
-        >
-          <template v-if="locationOk && originPoint">
-            GPS ok ±{{ Math.round(originPoint.accuracy ?? 0) }}m
-          </template>
-          <template v-else>Location not set</template>
-        </span>
-      </div>
-
       <button
         class="btn btn-primary btn-block"
         type="button"
@@ -274,9 +264,27 @@ function startFavorite(fav: PlannedRoute) {
       >
         {{ loading && !route ? (locating ? 'Getting location…' : 'Planning…') : 'Plan route' }}
       </button>
+
+      <p class="gps-status small" :class="locationOk ? 'success' : 'muted'">
+        <template v-if="locationOk && originPoint">
+          <span class="gps-dot ok" aria-hidden="true" />
+          Location ready
+          <template v-if="originPoint.accuracy != null">
+            · ±{{ Math.round(originPoint.accuracy) }}m
+          </template>
+        </template>
+        <template v-else-if="locating">
+          <span class="gps-dot pulse" aria-hidden="true" />
+          Finding location…
+        </template>
+        <template v-else>
+          <span class="gps-dot" aria-hidden="true" />
+          Location pending — will request when you plan
+        </template>
+      </p>
     </div>
 
-    <p v-if="locationHint" class="error small">{{ locationHint }}</p>
+    <p v-if="locationHint && !locationOk" class="error small">{{ locationHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="success" class="success">{{ success }}</p>
 
