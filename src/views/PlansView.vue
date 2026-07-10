@@ -102,6 +102,7 @@ async function generate() {
       notes:
         [
           notes.value || null,
+          guest.profile.athleteNotes?.trim() || null,
           showRacePresets.value && raceId.value !== 'custom'
             ? `Race distance preset: ${targetLabel.value}`
             : null,

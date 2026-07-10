@@ -177,6 +177,50 @@ function testVoice() {
     </div>
 
     <div class="card stack">
+      <div class="card-title">Coach &amp; AI</div>
+      <p class="muted small" style="margin: 0">
+        Quiet automation — no extra screens. Ideas list: <code>docs/AI_IDEAS.md</code>.
+      </p>
+      <div class="field">
+        <label>Athlete notes (injury, fatigue, prefs)</label>
+        <textarea
+          :value="guest.profile.athleteNotes"
+          rows="2"
+          placeholder="e.g. sore left Achilles, keep volume easy"
+          @input="guest.setAthleteNotes(($event.target as HTMLTextAreaElement).value)"
+        />
+      </div>
+      <div class="row" style="justify-content: space-between">
+        <span class="small">Post-run debrief</span>
+        <div class="seg">
+          <button type="button" :class="{ active: guest.profile.autoDebrief }" @click="guest.setAutoDebrief(true)">On</button>
+          <button type="button" :class="{ active: !guest.profile.autoDebrief }" @click="guest.setAutoDebrief(false)">Off</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content: space-between">
+        <span class="small">Split commentary</span>
+        <div class="seg">
+          <button type="button" :class="{ active: guest.profile.autoSplitCommentary }" @click="guest.setAutoSplitCommentary(true)">On</button>
+          <button type="button" :class="{ active: !guest.profile.autoSplitCommentary }" @click="guest.setAutoSplitCommentary(false)">Off</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content: space-between">
+        <span class="small">Milestone cues (25/50/75%)</span>
+        <div class="seg">
+          <button type="button" :class="{ active: guest.profile.autoMilestones }" @click="guest.setAutoMilestones(true)">On</button>
+          <button type="button" :class="{ active: !guest.profile.autoMilestones }" @click="guest.setAutoMilestones(false)">Off</button>
+        </div>
+      </div>
+      <div class="row" style="justify-content: space-between">
+        <span class="small">Session brief on start</span>
+        <div class="seg">
+          <button type="button" :class="{ active: guest.profile.autoSessionBrief }" @click="guest.setAutoSessionBrief(true)">On</button>
+          <button type="button" :class="{ active: !guest.profile.autoSessionBrief }" @click="guest.setAutoSessionBrief(false)">Off</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card stack">
       <div class="card-title">Voice coach</div>
       <p class="muted small" style="margin: 0">
         Free browser speech (Web Speech API).

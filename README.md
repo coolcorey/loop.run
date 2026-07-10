@@ -48,7 +48,8 @@ Without `XAI_API_KEY`, road routing still works; AI features fall back to mock.
 | **Guest mode** | Plans/runs in localStorage |
 | **Turn cues** | Close announce distance (default 40m, configurable) |
 
-Voice upgrade path (cloud TTS, costs): see **[docs/VOICE.md](docs/VOICE.md)**.
+Voice upgrade path (cloud TTS, costs): see **[docs/VOICE.md](docs/VOICE.md)**.  
+AI ideas & roadmap: **[docs/AI_IDEAS.md](docs/AI_IDEAS.md)**.
 
 ## Scripts
 

@@ -110,6 +110,12 @@ function pathFor(run: RunLog) {
             <template v-if="s.index < run.splits.length"> · </template>
           </span>
         </p>
+        <div v-if="run.debrief" class="muted small" style="margin: 0.65rem 0 0">
+          <strong style="color: var(--text)">{{ run.debrief.headline }}</strong>
+          <ul style="margin: 0.35rem 0 0; padding-left: 1.1rem">
+            <li v-for="(b, i) in run.debrief.bullets" :key="i">{{ b }}</li>
+          </ul>
+        </div>
       </div>
     </div>
     <p v-else class="empty">No runs yet. Plan a loop and hit the pavement.</p>

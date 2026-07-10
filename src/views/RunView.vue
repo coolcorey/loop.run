@@ -26,6 +26,11 @@ import { useGuestStore } from '@/stores/guest'
 import { usePlansStore } from '@/stores/plans'
 import { useRunsStore } from '@/stores/runs'
 import { resolveHeading } from '@/services/bearing'
+import {
+  fetchDebrief,
+  localMilestoneLine,
+  localSplitCommentary,
+} from '@/services/ai/extra'
 import { SPEED_LEGEND, speedToColor } from '@/services/speedColor'
 import type { CoachContext, GeoPoint } from '@/types'
 
@@ -54,6 +59,8 @@ const nowTick = ref(Date.now())
 const lastSpokenTurnKey = ref<string | null>(null)
 const lastSpokenCoach = ref<string | null>(null)
 const lastOffRouteSpoken = ref(false)
+/** Highest milestone spoken: 0 | 0.25 | 0.5 | 0.75 */
+const lastMilestone = ref(0)
 
 const run = computed(() => runs.activeRun)
 const route = computed(() => runs.activeRoute)
@@ -314,6 +321,7 @@ async function start(opts: { forceNew?: boolean; free?: boolean } = {}) {
   lastSpokenTurnKey.value = null
   lastSpokenCoach.value = null
   lastOffRouteSpoken.value = false
+  lastMilestone.value = 0
   await beginTracking({ resumed: Boolean(canResume) })
   if (guest.profile.voiceEnabled) {
     const free = runs.isFreeRun
@@ -344,6 +352,8 @@ async function finish(auto = false) {
     plans.markSessionComplete(finished.planId, finished.planDay)
   }
 
+  const archived = runs.finishRun(true)
+
   if (guest.profile.voiceEnabled) {
     speak(
       auto || finished?.loopCompleted
@@ -352,7 +362,23 @@ async function finish(auto = false) {
       voiceOpts(),
     )
   }
-  runs.finishRun(true)
+
+  // Quiet AI debrief — no new screens; speaks one line + stores on history
+  if (guest.profile.autoDebrief && archived) {
+    void (async () => {
+      const d = await fetchDebrief({
+        run: archived,
+        unit: guest.unit,
+        athleteNotes: guest.profile.athleteNotes || undefined,
+      })
+      if (!d) return
+      runs.attachDebrief(d)
+      if (guest.profile.voiceEnabled && guest.profile.voiceCoach && d.speak) {
+        // slight delay so finish line speaks first
+        window.setTimeout(() => speak(d.speak, voiceOpts()), 1600)
+      }
+    })()
+  }
 }
 
 async function discard() {
@@ -392,11 +418,42 @@ watch(
     if (!tracking.value || n <= lastSplitCount.value) return
     const split = run.value?.splits[n - 1]
     lastSplitCount.value = n
-    if (split && guest.profile.voiceEnabled) {
+    if (!split || !guest.profile.voiceEnabled) return
+    if (guest.profile.autoSplitCommentary) {
+      const targetPace = run.value?.targetSpeedMps
+        ? // m/s → sec per unit
+          (guest.unit === 'mi' ? 1609.344 : 1000) / run.value.targetSpeedMps
+        : null
+      speak(
+        localSplitCommentary({
+          splitIndex: split.index,
+          paceSecondsPerUnit: split.paceSecondsPerUnit,
+          targetPaceSecondsPerUnit: targetPace,
+          unit: guest.unit,
+        }),
+        voiceOpts(),
+      )
+    } else {
       speak(
         `Split ${split.index}. Pace ${formatPace(split.paceSecondsPerUnit)} per ${guest.unit}.`,
         voiceOpts(),
       )
+    }
+  },
+)
+
+watch(
+  () => progress.value,
+  (p) => {
+    if (!tracking.value || !guest.profile.voiceEnabled) return
+    if (!guest.profile.autoMilestones || !route.value) return
+    const marks = [0.25, 0.5, 0.75] as const
+    for (const m of marks) {
+      if (p >= m && lastMilestone.value < m) {
+        lastMilestone.value = m
+        speak(localMilestoneLine(m), voiceOpts())
+        break
+      }
     }
   },
 )

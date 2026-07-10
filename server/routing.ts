@@ -1,4 +1,5 @@
 import {
+  doubleBackScore,
   estimateCalories,
   haversineMeters,
   loopWaypoints,
@@ -52,7 +53,7 @@ async function routeOsrm(points: Point[]): Promise<{
     'https://router.project-osrm.org'
   const url =
     `${base.replace(/\/$/, '')}/route/v1/foot/${coordsParam(points)}` +
-    `?overview=full&geometries=geojson&steps=true`
+    `?overview=full&geometries=geojson&steps=true&continue_straight=true`
 
   const res = await fetch(url, {
     headers: { Accept: 'application/json' },
@@ -228,11 +229,14 @@ export async function planRoadLoop(input: {
   let target = Math.min(Math.max(input.distanceMeters, 400), 42_195)
   let radiusScale = 0.68
   let best: RoutedLoop | null = null
+  let bestScore = Infinity
   let provider: RoutedLoop['provider'] = 'osrm'
 
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const bearing = (input.startBearing ?? 20) + attempt * 25
-    const wps = loopWaypoints(input.origin, target, 5, radiusScale, bearing)
+  // More attempts + more ring waypoints reduce out-and-back corridors
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const bearing = (input.startBearing ?? 20) + attempt * 37
+    const wpCount = 6 + (attempt % 2) // 6 or 7 around the ring
+    const wps = loopWaypoints(input.origin, target, wpCount, radiusScale, bearing)
 
     let routed = await routeOrs(wps).catch(() => null)
     if (routed) {
@@ -261,9 +265,17 @@ export async function planRoadLoop(input: {
     }
 
     const ratio = routed.distance / target
-    best = loop
+    const distPenalty = Math.abs(1 - ratio)
+    const reversePenalty = doubleBackScore(routed.path) * 2.5
+    const score = distPenalty + reversePenalty
 
-    if (ratio >= 0.88 && ratio <= 1.12) {
+    if (score < bestScore) {
+      bestScore = score
+      best = loop
+    }
+
+    // Accept good distance AND low doubling-back
+    if (ratio >= 0.88 && ratio <= 1.12 && reversePenalty < 0.35) {
       return loop
     }
     // Adjust radius for next attempt (road networks often lengthen geometry)

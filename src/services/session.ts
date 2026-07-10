@@ -1,6 +1,8 @@
 import type { DistanceUnit, PlannedRoute, TrainingSession } from '@/types'
 import { ai } from '@/services/ai'
+import { fetchSessionBrief } from '@/services/ai/extra'
 import { getCurrentPosition, FALLBACK_ORIGIN } from '@/services/geo'
+import { speak } from '@/services/voice'
 import { useGuestStore } from '@/stores/guest'
 import { useRunsStore } from '@/stores/runs'
 
@@ -45,6 +47,7 @@ export async function startSessionRun(opts: {
   const targetValue =
     opts.unit === 'mi' ? distanceMeters / 1609.344 : distanceMeters / 1000
 
+  const notes = guest.profile.athleteNotes?.trim()
   const route = await ai.planRoute({
     origin,
     goalKind: 'distance',
@@ -52,7 +55,13 @@ export async function startSessionRun(opts: {
     unit: opts.unit,
     weightKg: guest.profile.weightKg,
     turnAnnounceMeters: guest.profile.turnAnnounceMeters,
-    preferences: `Training session: ${opts.session.title}. ${opts.session.description}`,
+    preferences: [
+      `Training session: ${opts.session.title}. ${opts.session.description}`,
+      'True loop preferred; avoid doubling back on the same road.',
+      notes ? `Athlete notes: ${notes}` : null,
+    ]
+      .filter(Boolean)
+      .join(' '),
   })
 
   // Prefer planned summary that names the session
@@ -69,6 +78,26 @@ export async function startSessionRun(opts: {
     planDay: opts.session.day,
     sessionTitle: opts.session.title,
   })
+
+  // Quiet session brief (voice only — no new screen)
+  if (
+    guest.profile.voiceEnabled &&
+    guest.profile.autoSessionBrief
+  ) {
+    const brief = await fetchSessionBrief({
+      session: opts.session,
+      unit: opts.unit,
+      athleteNotes: notes || undefined,
+    })
+    if (brief?.speak) {
+      speak(brief.speak, { rate: guest.profile.voiceRate })
+    } else {
+      speak(
+        `Today: ${opts.session.title}. Stay smooth.`,
+        { rate: guest.profile.voiceRate },
+      )
+    }
+  }
 
   return route
 }

@@ -126,6 +126,13 @@ export interface RunSplit {
   at: string
 }
 
+export interface RunDebrief {
+  headline: string
+  bullets: string[]
+  speak: string
+  at: string
+}
+
 export interface RunLog {
   id: string
   routeId: string | null
@@ -160,6 +167,8 @@ export interface RunLog {
    * Kept smaller than full samples.
    */
   trailSnapshot?: GeoPoint[]
+  /** AI post-run debrief */
+  debrief?: RunDebrief
 }
 
 export interface StartRunOptions {
@@ -192,4 +201,14 @@ export interface GuestProfile {
   keepScreenOnDuringRun: boolean
   /** Off-route threshold in meters */
   offRouteMeters: number
+  /** Injury / fatigue / constraints for AI plans + debriefs */
+  athleteNotes: string
+  /** Auto post-run AI debrief */
+  autoDebrief: boolean
+  /** Auto spoken split commentary */
+  autoSplitCommentary: boolean
+  /** Auto milestone voice (25/50/75%) */
+  autoMilestones: boolean
+  /** Speak brief when starting a train session */
+  autoSessionBrief: boolean
 }

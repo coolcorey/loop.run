@@ -148,7 +148,16 @@ async function plan(opts: { regenerate?: boolean } = {}) {
       unit: guest.unit,
       weightKg: guest.profile.weightKg,
       turnAnnounceMeters: guest.profile.turnAnnounceMeters,
-      preferences: preferences.value || undefined,
+      preferences: [
+        preferences.value || null,
+        'Prefer a true closed loop; avoid out-and-back doubling on the same road.',
+        guest.profile.athleteNotes?.trim()
+          ? `Athlete notes: ${guest.profile.athleteNotes.trim()}`
+          : null,
+        regenerate ? 'Fresh variation of the previous loop direction.' : null,
+      ]
+        .filter(Boolean)
+        .join(' '),
       startBearing: bearing,
       regenerate,
     })

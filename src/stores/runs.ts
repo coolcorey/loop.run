@@ -5,6 +5,7 @@ import type {
   DistanceUnit,
   GeoPoint,
   PlannedRoute,
+  RunDebrief,
   RunLog,
   RunSplit,
   StartRunOptions,
@@ -422,9 +423,20 @@ export const useRunsStore = defineStore('runs', () => {
     justFinishedLoop.value = false
   }
 
+  function attachDebrief(debrief: RunDebrief) {
+    // Prefer updating the most recent history entry if we just finished
+    if (history.value[0] && !activeRun.value) {
+      history.value[0] = { ...history.value[0], debrief }
+      return
+    }
+    if (activeRun.value) {
+      activeRun.value.debrief = debrief
+    }
+  }
+
   function finishRun(completed = true) {
     const run = activeRun.value
-    if (!run) return
+    if (!run) return run
     run.finishedAt = new Date().toISOString()
     run.completed = completed || run.loopCompleted
     // Keep a denser trail snapshot for history speed-map (with speeds)
@@ -441,6 +453,7 @@ export const useRunsStore = defineStore('runs', () => {
     latestNudge.value = null
     liveDistanceToPath.value = null
     justFinishedLoop.value = false
+    return archived
   }
 
   function discardActiveRun() {
@@ -475,6 +488,7 @@ export const useRunsStore = defineStore('runs', () => {
     appendSample,
     addNudge,
     clearJustFinishedLoop,
+    attachDebrief,
     finishRun,
     discardActiveRun,
   }

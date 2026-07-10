@@ -19,6 +19,11 @@ function defaultProfile(): GuestProfile {
     voiceRate: 1.05,
     keepScreenOnDuringRun: true,
     offRouteMeters: 45,
+    athleteNotes: '',
+    autoDebrief: true,
+    autoSplitCommentary: true,
+    autoMilestones: true,
+    autoSessionBrief: true,
   }
 }
 
@@ -34,6 +39,11 @@ function migrateProfile(raw: Partial<GuestProfile> | null): GuestProfile {
     voiceRate: raw.voiceRate ?? 1.05,
     keepScreenOnDuringRun: raw.keepScreenOnDuringRun ?? true,
     offRouteMeters: raw.offRouteMeters ?? 45,
+    athleteNotes: raw.athleteNotes ?? '',
+    autoDebrief: raw.autoDebrief ?? true,
+    autoSplitCommentary: raw.autoSplitCommentary ?? true,
+    autoMilestones: raw.autoMilestones ?? true,
+    autoSessionBrief: raw.autoSessionBrief ?? true,
   }
 }
 
@@ -90,6 +100,26 @@ export const useGuestStore = defineStore('guest', () => {
     profile.value.offRouteMeters = Math.max(20, Math.min(120, meters))
   }
 
+  function setAthleteNotes(notes: string) {
+    profile.value.athleteNotes = notes.slice(0, 500)
+  }
+
+  function setAutoDebrief(on: boolean) {
+    profile.value.autoDebrief = on
+  }
+
+  function setAutoSplitCommentary(on: boolean) {
+    profile.value.autoSplitCommentary = on
+  }
+
+  function setAutoMilestones(on: boolean) {
+    profile.value.autoMilestones = on
+  }
+
+  function setAutoSessionBrief(on: boolean) {
+    profile.value.autoSessionBrief = on
+  }
+
   return {
     profile,
     unit,
@@ -103,5 +133,10 @@ export const useGuestStore = defineStore('guest', () => {
     setVoiceRate,
     setKeepScreenOnDuringRun,
     setOffRouteMeters,
+    setAthleteNotes,
+    setAutoDebrief,
+    setAutoSplitCommentary,
+    setAutoMilestones,
+    setAutoSessionBrief,
   }
 })

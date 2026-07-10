@@ -82,6 +82,14 @@ app.post('/api/route/loop', async (c) => {
         ? ((body.startBearing % 360) + 360) % 360
         : 15 + Math.random() * 40
 
+    const loopPrefs =
+      [
+        body.preferences,
+        'Prefer a true closed loop. Avoid out-and-back segments where the runner doubles back on the same road.',
+      ]
+        .filter(Boolean)
+        .join(' ')
+
     if (
       !body.regenerate &&
       typeof body.startBearing !== 'number' &&
@@ -91,8 +99,8 @@ app.post('/api/route/loop', async (c) => {
       try {
         const raw = await xaiChat({
           system:
-            'You help plan outdoor running loops. Reply JSON only: {"bearing":number,"notes":string}. bearing is degrees from north (0-359) for the first leg of a loop starting at the user.',
-          user: `Runner preferences: ${body.preferences}\nPick a sensible first bearing for a neighborhood loop.`,
+            'You help plan outdoor running loops that are true circuits (not out-and-back). Reply JSON only: {"bearing":number,"notes":string}. bearing is degrees from north (0-359) for the first leg.',
+          user: `Runner preferences: ${loopPrefs}\nPick a first bearing that opens a neighborhood loop, not a dead-end corridor.`,
           json: true,
           temperature: 0.4,
         })
@@ -120,16 +128,17 @@ app.post('/api/route/loop', async (c) => {
       try {
         const raw = await xaiChat({
           system:
-            'You are a concise running coach for Loop. Reply JSON only: {"summary":string,"notes":string}. summary is a short route title (max 8 words). notes is 1-2 sentences about the loop feel (hills unknown ok).',
+            'You are a concise running coach for Loop. Reply JSON only: {"summary":string,"notes":string}. summary is a short route title (max 8 words). notes is 1-2 sentences: how the loop flows (true circuit vs any caveats), and one pacing tip. Prefer celebrating loop shape when it is a circuit.',
           user: JSON.stringify({
             goalKind: body.goalKind,
             targetValue: body.targetValue,
             unit: body.unit,
             distanceMeters: Math.round(loop.distanceMeters),
             estimatedCalories: loop.estimatedCalories,
-            preferences: body.preferences ?? null,
+            preferences: loopPrefs,
             turnCount: loop.turns.length,
             provider: loop.provider,
+            regenerate: Boolean(body.regenerate),
           }),
           json: true,
           temperature: 0.5,
@@ -316,6 +325,95 @@ If offRoute is true, tell them to get back on the path. If targetSpeedMps is set
   } catch (e) {
     return c.json(
       { error: e instanceof Error ? e.message : 'Nudge failed' },
+      500,
+    )
+  }
+})
+
+app.post('/api/ai/debrief', async (c) => {
+  try {
+    const body = await c.req.json<{
+      routeSummary: string
+      distanceMeters: number
+      durationSeconds: number
+      alongRouteMeters?: number
+      loopCompleted?: boolean
+      splits?: { index: number; paceSecondsPerUnit: number; durationSeconds: number }[]
+      targetSpeedMps?: number | null
+      unit?: 'mi' | 'km'
+      athleteNotes?: string
+      freeRun?: boolean
+    }>()
+
+    if (!xaiConfigured()) {
+      return c.json({ error: 'XAI_API_KEY not configured', code: 'NO_XAI' }, 503)
+    }
+
+    const raw = await xaiChat({
+      system: `You are Loop's post-run coach. Reply JSON only:
+{"headline":string,"bullets":[string,string,string],"speak":string}
+- headline: max 8 words
+- bullets: exactly 3 short coaching points (what went well, one fix, next focus)
+- speak: one sentence to say aloud (max 20 words)
+Respect athlete notes (injury/fatigue) if present. Be direct, not cheesy.`,
+      user: JSON.stringify(body),
+      json: true,
+      temperature: 0.55,
+    })
+    const parsed = parseJsonLoose<{
+      headline?: string
+      bullets?: string[]
+      speak?: string
+    }>(raw)
+    return c.json({
+      headline: parsed.headline || 'Solid work',
+      bullets: (parsed.bullets || []).slice(0, 3),
+      speak: parsed.speak || parsed.headline || 'Nice run.',
+      at: new Date().toISOString(),
+    })
+  } catch (e) {
+    return c.json(
+      { error: e instanceof Error ? e.message : 'Debrief failed' },
+      500,
+    )
+  }
+})
+
+app.post('/api/ai/session-brief', async (c) => {
+  try {
+    const body = await c.req.json<{
+      sessionTitle: string
+      description?: string
+      distanceMeters?: number
+      targetPaceSecondsPerUnit?: number
+      unit?: 'mi' | 'km'
+      athleteNotes?: string
+      planTitle?: string
+    }>()
+
+    if (!xaiConfigured()) {
+      return c.json({ error: 'XAI_API_KEY not configured', code: 'NO_XAI' }, 503)
+    }
+
+    const raw = await xaiChat({
+      system: `You brief a runner before a training session. Reply JSON only:
+{"speak":string,"card":string}
+- speak: one breath, max 25 words, for TTS before they start
+- card: one short line for the UI (max 14 words)
+Warmup + intent + one focus. Honor injury notes.`,
+      user: JSON.stringify(body),
+      json: true,
+      temperature: 0.5,
+    })
+    const parsed = parseJsonLoose<{ speak?: string; card?: string }>(raw)
+    return c.json({
+      speak: parsed.speak || `Today: ${body.sessionTitle}. Stay smooth.`,
+      card: parsed.card || body.sessionTitle,
+      at: new Date().toISOString(),
+    })
+  } catch (e) {
+    return c.json(
+      { error: e instanceof Error ? e.message : 'Brief failed' },
       500,
     )
   }
