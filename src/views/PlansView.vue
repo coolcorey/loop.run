@@ -82,8 +82,7 @@ const sorted = computed(() => plans.plans)
 
 <template>
   <section>
-    <h1>Training plans</h1>
-    <p class="lede">
+    <p class="lede" style="margin-top: 0">
       Build a plan, then start today’s session — Loop plans a loop and sets target pace.
     </p>
 

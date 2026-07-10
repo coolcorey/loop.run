@@ -58,8 +58,7 @@ function testVoice() {
 
 <template>
   <section>
-    <h1>Settings</h1>
-    <p class="lede">Guest defaults. Sync / accounts come later with PocketBase.</p>
+    <p class="lede" style="margin-top: 0">Guest defaults. Sync / accounts come later with PocketBase.</p>
 
     <div class="card stack">
       <div class="field">

@@ -45,8 +45,7 @@ async function startToday() {
 
 <template>
   <section>
-    <h1>Ready when you are.</h1>
-    <p class="lede">
+    <p class="lede" style="margin-top: 0">
       Plan a loop, run on-route with splits and voice coach, or start today’s training session.
     </p>
 

@@ -48,6 +48,7 @@ export default defineConfig({
   server: {
     // Listen on LAN; pair with HTTPS from basicSsl for mobile GPS
     host: true,
+    port: 9090,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8787',

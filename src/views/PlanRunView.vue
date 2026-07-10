@@ -206,8 +206,7 @@ function startFavorite(fav: PlannedRoute) {
 
 <template>
   <section>
-    <h1>Plan a loop</h1>
-    <p class="lede">
+    <p class="lede" style="margin-top: 0">
       Pick a distance or calorie goal. We’ll build a loop from where you are and
       bring you back. Don’t like it? Generate another, or save ones you do.
     </p>
@@ -298,7 +297,8 @@ function startFavorite(fav: PlannedRoute) {
       </div>
       <RouteMap
         style="margin-top: 0.75rem"
-        height="240px"
+        height="260px"
+        high-contrast-path
         :path="route.path"
         :user="originPoint"
       />

@@ -1,4 +1,5 @@
 import type { GeoPoint } from '@/types'
+import { haversineMeters } from '@/services/geo'
 
 /** Initial bearing from A → B in degrees [0, 360), clockwise from north. */
 export function bearingDegrees(a: GeoPoint, b: GeoPoint): number {
@@ -12,46 +13,39 @@ export function bearingDegrees(a: GeoPoint, b: GeoPoint): number {
   return ((θ * 180) / Math.PI + 360) % 360
 }
 
+const STILL_MPS = 0.75
+const MIN_TRACK_METERS = 2.5
+
 /**
- * Prefer device heading when moving; otherwise derive from track.
- * Returns null if we can't trust a direction yet.
+ * Direction for the map arrow / heading-up camera.
+ *
+ * - Moving: always use track bearing (path of travel). Phone orientation
+ *   (pocket, sideways) must not matter.
+ * - Standing still: allow GPS/device heading if present (compass-like).
  */
 export function resolveHeading(
   point: GeoPoint,
   previous: GeoPoint | null,
 ): number | null {
-  const device = point.heading
   const speed = point.speed
-
-  // GPS heading is often junk when nearly stationary
   const moving =
-    speed != null && Number.isFinite(speed) && speed >= 0.7 /* ~1.5 mph */
+    (speed != null && Number.isFinite(speed) && speed >= STILL_MPS) ||
+    (previous != null &&
+      haversineMeters(previous, point) >= MIN_TRACK_METERS)
 
-  if (
-    moving &&
-    device != null &&
-    Number.isFinite(device) &&
-    device >= 0
-  ) {
-    return device
-  }
-
-  if (previous && moving) {
-    return bearingDegrees(previous, point)
-  }
-
-  // Slow but have a device heading
-  if (device != null && Number.isFinite(device) && device >= 0) {
-    return device
-  }
-
-  if (previous) {
-    const dlat = Math.abs(point.lat - previous.lat)
-    const dlng = Math.abs(point.lng - previous.lng)
-    // Only use track bearing if we actually moved a bit
-    if (dlat > 1e-6 || dlng > 1e-6) {
+  if (moving && previous) {
+    const dist = haversineMeters(previous, point)
+    if (dist >= MIN_TRACK_METERS) {
       return bearingDegrees(previous, point)
     }
+    // Moving but tiny step — keep previous track if we just had one via caller smoothing
+    return null
+  }
+
+  // Stationary: device/GPS heading is OK (points where the phone thinks "forward")
+  const device = point.heading
+  if (device != null && Number.isFinite(device) && device >= 0) {
+    return device
   }
 
   return null

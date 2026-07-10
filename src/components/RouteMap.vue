@@ -10,19 +10,14 @@ const props = withDefaults(
   defineProps<{
     path?: GeoPoint[]
     user?: GeoPoint | null
-    /** Live GPS track samples (for speed-colored trail) */
     trail?: GeoPoint[]
-    /** Degrees from north; used for marker + heading-up camera */
     heading?: number | null
-    /**
-     * overview — fit whole route (Plan)
-     * follow — keep user centered (Run)
-     */
     mode?: 'overview' | 'follow'
-    /** When following: rotate map so travel direction is up */
     headingUp?: boolean
     height?: string
     interactive?: boolean
+    /** High-contrast planned path (outdoor / sunglasses) */
+    highContrastPath?: boolean
   }>(),
   {
     path: () => [],
@@ -33,18 +28,23 @@ const props = withDefaults(
     headingUp: true,
     height: '220px',
     interactive: true,
+    highContrastPath: false,
   },
 )
 
 const el = ref<HTMLDivElement | null>(null)
 let map: MaplibreMap | null = null
 let followReady = false
+/** User panned/zoomed — pause auto-follow until idle */
+let userInteracting = false
+let resumeFollowTimer: ReturnType<typeof setTimeout> | null = null
+const RESUME_FOLLOW_MS = 5_000
 
 const STYLE =
   (import.meta.env.VITE_MAP_STYLE as string | undefined) ||
   'https://tiles.openfreemap.org/styles/dark'
 
-const FOLLOW_ZOOM = 16.2
+const FOLLOW_ZOOM = 16.4
 
 type LngLat = [number, number]
 type FeatureCollection = {
@@ -79,7 +79,6 @@ function pathGeoJson(path: GeoPoint[]): FeatureCollection {
   }
 }
 
-/** Build short segments colored by segment speed */
 function trailGeoJson(trail: GeoPoint[]): FeatureCollection {
   const features: FeatureCollection['features'] = []
   for (let i = 1; i < trail.length; i++) {
@@ -146,8 +145,6 @@ function addChevronImage() {
   if (!ctx) return
 
   ctx.clearRect(0, 0, size, size)
-
-  // Outer glow
   const grd = ctx.createRadialGradient(
     size / 2,
     size / 2,
@@ -156,69 +153,108 @@ function addChevronImage() {
     size / 2,
     40,
   )
-  grd.addColorStop(0, 'rgba(255, 138, 91, 0.35)')
-  grd.addColorStop(1, 'rgba(255, 138, 91, 0)')
+  grd.addColorStop(0, 'rgba(255, 255, 255, 0.35)')
+  grd.addColorStop(1, 'rgba(255, 255, 255, 0)')
   ctx.fillStyle = grd
   ctx.beginPath()
   ctx.arc(size / 2, size / 2, 40, 0, Math.PI * 2)
   ctx.fill()
 
-  // Disc
   ctx.beginPath()
-  ctx.arc(size / 2, size / 2 + 4, 18, 0, Math.PI * 2)
-  ctx.fillStyle = 'rgba(15, 20, 25, 0.75)'
+  ctx.arc(size / 2, size / 2 + 4, 20, 0, Math.PI * 2)
+  ctx.fillStyle = 'rgba(15, 20, 25, 0.85)'
   ctx.fill()
 
-  // Chevron pointing up
   ctx.beginPath()
-  ctx.moveTo(size / 2, 12)
-  ctx.lineTo(size - 18, size - 16)
-  ctx.lineTo(size / 2, size - 28)
-  ctx.lineTo(18, size - 16)
+  ctx.moveTo(size / 2, 10)
+  ctx.lineTo(size - 16, size - 14)
+  ctx.lineTo(size / 2, size - 26)
+  ctx.lineTo(16, size - 14)
   ctx.closePath()
-  ctx.fillStyle = '#ff8a5b'
-  ctx.strokeStyle = '#f8fafc'
+  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = '#0f1419'
   ctx.lineWidth = 4
   ctx.lineJoin = 'round'
   ctx.fill()
   ctx.stroke()
+  // accent tip
+  ctx.beginPath()
+  ctx.moveTo(size / 2, 10)
+  ctx.lineTo(size / 2 + 10, 28)
+  ctx.lineTo(size / 2 - 10, 28)
+  ctx.closePath()
+  ctx.fillStyle = '#ff8a5b'
+  ctx.fill()
 
   map.addImage('user-chevron', ctx.getImageData(0, 0, size, size), {
     pixelRatio: 2,
   })
 }
 
+function pauseFollowFromUser() {
+  userInteracting = true
+  if (resumeFollowTimer) clearTimeout(resumeFollowTimer)
+  resumeFollowTimer = setTimeout(() => {
+    userInteracting = false
+    resumeFollowTimer = null
+    if (props.mode === 'follow' && props.user && map?.isStyleLoaded()) {
+      syncFollow(true)
+    }
+  }, RESUME_FOLLOW_MS)
+}
+
 function ensureLayers() {
   if (!map) return
   addChevronImage()
 
-  // Planned route (muted underlay)
   if (!map.getSource('route')) {
     map.addSource('route', {
       type: 'geojson',
       data: pathGeoJson(props.path),
+    })
+    // White casing for outdoor contrast
+    map.addLayer({
+      id: 'route-casing',
+      type: 'line',
+      source: 'route',
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': props.highContrastPath || props.mode === 'follow' ? 10 : 7,
+        'line-opacity': 0.95,
+      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
     })
     map.addLayer({
       id: 'route-line',
       type: 'line',
       source: 'route',
       paint: {
-        'line-color': '#3dd6c6',
-        'line-width': props.mode === 'follow' ? 3.5 : 4.5,
-        'line-opacity': props.mode === 'follow' ? 0.35 : 0.95,
+        'line-color':
+          props.highContrastPath || props.mode === 'follow'
+            ? '#f5ff3d'
+            : '#3dd6c6',
+        'line-width': props.highContrastPath || props.mode === 'follow' ? 6 : 4.5,
+        'line-opacity': 1,
       },
-      layout: {
-        'line-cap': 'round',
-        'line-join': 'round',
-      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
     })
   }
 
-  // Speed-colored completed trail
   if (!map.getSource('trail')) {
     map.addSource('trail', {
       type: 'geojson',
       data: trailGeoJson(props.trail),
+    })
+    map.addLayer({
+      id: 'trail-casing',
+      type: 'line',
+      source: 'trail',
+      paint: {
+        'line-color': '#0f1419',
+        'line-width': 9,
+        'line-opacity': 0.55,
+      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
     })
     map.addLayer({
       id: 'trail-line',
@@ -227,16 +263,12 @@ function ensureLayers() {
       paint: {
         'line-color': ['get', 'color'],
         'line-width': 6,
-        'line-opacity': 0.95,
+        'line-opacity': 1,
       },
-      layout: {
-        'line-cap': 'round',
-        'line-join': 'round',
-      },
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
     })
   }
 
-  // Accuracy halo + runner chevron on top
   if (!map.getSource('user')) {
     map.addSource('user', {
       type: 'geojson',
@@ -252,15 +284,15 @@ function ensureLayers() {
           ['linear'],
           ['zoom'],
           14,
-          10,
+          12,
           17,
-          22,
+          26,
         ],
-        'circle-color': '#ff8a5b',
-        'circle-opacity': 0.18,
-        'circle-stroke-width': 1,
-        'circle-stroke-color': '#ff8a5b',
-        'circle-stroke-opacity': 0.4,
+        'circle-color': '#ffffff',
+        'circle-opacity': 0.2,
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff',
+        'circle-stroke-opacity': 0.55,
       },
     })
     map.addLayer({
@@ -269,7 +301,7 @@ function ensureLayers() {
       source: 'user',
       layout: {
         'icon-image': 'user-chevron',
-        'icon-size': 1.05,
+        'icon-size': 1.15,
         'icon-rotate': ['get', 'bearing'],
         'icon-rotation-alignment': 'map',
         'icon-pitch-alignment': 'map',
@@ -297,13 +329,14 @@ function syncOverview() {
     has = true
   }
   if (has) {
-    map.fitBounds(bounds, { padding: 36, maxZoom: 15, duration: 400 })
+    map.fitBounds(bounds, { padding: 28, maxZoom: 15, duration: 400 })
   }
   map.easeTo({ bearing: 0, duration: 300 })
 }
 
-function syncFollow() {
+function syncFollow(force = false) {
   if (!map || !props.user) return
+  if (userInteracting && !force) return
 
   const bearing =
     props.headingUp && props.heading != null && Number.isFinite(props.heading)
@@ -334,12 +367,22 @@ function syncData() {
   trail?.setData(trailGeoJson(props.trail))
   user?.setData(userGeoJson(props.user, props.heading))
 
-  // Dim planned route when we have a live trail
+  // Planned path stays bright; trail overlays with speed colors
   if (map.getLayer('route-line')) {
+    const hi = props.highContrastPath || props.mode === 'follow'
+    map.setPaintProperty('route-line', 'line-color', hi ? '#f5ff3d' : '#3dd6c6')
+    map.setPaintProperty('route-line', 'line-width', hi ? 6 : 4.5)
     map.setPaintProperty(
       'route-line',
       'line-opacity',
-      props.mode === 'follow' || props.trail.length > 1 ? 0.35 : 0.95,
+      props.trail.length > 2 ? 0.75 : 1,
+    )
+  }
+  if (map.getLayer('route-casing')) {
+    map.setPaintProperty(
+      'route-casing',
+      'line-width',
+      props.highContrastPath || props.mode === 'follow' ? 10 : 7,
     )
   }
 
@@ -347,6 +390,7 @@ function syncData() {
     syncFollow()
   } else if (props.mode === 'overview') {
     followReady = false
+    userInteracting = false
     syncOverview()
   }
 }
@@ -368,6 +412,8 @@ onMounted(() => {
     attributionControl: { compact: true },
     interactive: props.interactive,
     bearingSnap: 0,
+    dragRotate: true,
+    touchPitch: false,
   })
 
   map.addControl(
@@ -382,6 +428,15 @@ onMounted(() => {
     ensureLayers()
     syncData()
   })
+
+  // Manual explore — pause auto-follow, resume after 5s idle
+  map.on('dragstart', () => pauseFollowFromUser())
+  map.on('rotatestart', (e) => {
+    if ((e as { originalEvent?: Event }).originalEvent) pauseFollowFromUser()
+  })
+  map.on('zoomstart', (e) => {
+    if ((e as { originalEvent?: Event }).originalEvent) pauseFollowFromUser()
+  })
 })
 
 watch(
@@ -393,6 +448,7 @@ watch(
       props.heading,
       props.mode,
       props.headingUp,
+      props.highContrastPath,
     ] as const,
   () => {
     if (!map?.isStyleLoaded()) return
@@ -403,6 +459,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  if (resumeFollowTimer) clearTimeout(resumeFollowTimer)
   map?.remove()
   map = null
 })
@@ -417,9 +474,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .route-map {
   width: 100%;
-  border-radius: 12px;
+  border-radius: 0;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: none;
   background: #0b0f14;
 }
 

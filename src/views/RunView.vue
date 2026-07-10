@@ -20,7 +20,6 @@ import {
 import {
   enableRunWakeLock,
   isWakeLockActive,
-  isWakeLockSupported,
   releaseScreenWakeLock,
 } from '@/services/wakeLock'
 import { useGuestStore } from '@/stores/guest'
@@ -44,7 +43,6 @@ const mapHeading = ref<number | null>(null)
 /** Heading-up (course up) vs north-up */
 const headingUp = ref(true)
 
-const wakeSupported = isWakeLockSupported()
 const wakeActive = ref(false)
 const lastSplitCount = ref(0)
 let watchId: number | null = null
@@ -419,254 +417,181 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section>
-    <h1>Run</h1>
-    <p class="lede">
-      On-route progress, splits, and coach.
-      <RouterLink to="/settings">Settings</RouterLink>
-    </p>
-
-    <div v-if="run?.sessionTitle" class="card">
-      <div class="card-title">Session</div>
-      <strong>{{ run.sessionTitle }}</strong>
-      <p v-if="targetPaceDisplay" class="muted small" style="margin: 0.35rem 0 0">
-        Target pace {{ targetPaceDisplay }} / {{ guest.unit }}
-      </p>
-    </div>
-
-    <div v-if="route" class="card">
-      <div class="card-title">Route</div>
-      <strong>{{ route.summary }}</strong>
-      <p class="muted small" style="margin: 0.35rem 0 0.65rem">
-        {{ formatDistance(route.distanceMeters, guest.unit) }}
-        · ~{{ route.estimatedCalories }} kcal
-      </p>
+  <section class="run-page">
+    <!-- Map first, max space -->
+    <div class="run-map-wrap">
       <RouteMap
+        v-if="route"
         :path="route.path"
         :user="lastPoint"
         :trail="trailSamples"
         :heading="mapHeading"
         :heading-up="headingUp"
         mode="follow"
-        height="280px"
+        high-contrast-path
+        height="min(52dvh, 420px)"
       />
-      <div class="speed-legend" aria-label="Speed color legend">
-        <span
-          v-for="s in SPEED_LEGEND"
-          :key="s.label"
-          class="speed-legend-stop"
-        >
-          <i :style="{ background: s.color }" />
-          {{ s.label }}
-        </span>
+      <div v-else class="run-map-empty">
+        <p class="muted small" style="margin: 0">
+          No route yet.
+          <RouterLink to="/plan">Plan a loop</RouterLink>
+        </p>
       </div>
-      <div class="row" style="margin-top: 0.55rem; justify-content: space-between">
-        <span class="muted small">Map orientation</span>
+      <div class="run-map-overlay">
         <div class="seg">
-          <button
-            type="button"
-            :class="{ active: headingUp }"
-            @click="headingUp = true"
-          >
+          <button type="button" :class="{ active: headingUp }" @click="headingUp = true">
             Heading up
           </button>
-          <button
-            type="button"
-            :class="{ active: !headingUp }"
-            @click="headingUp = false"
-          >
+          <button type="button" :class="{ active: !headingUp }" @click="headingUp = false">
             North up
           </button>
         </div>
       </div>
-      <p class="muted small" style="margin: 0.35rem 0 0">
-        <template v-if="mapHeading != null">
-          Bearing {{ Math.round(mapHeading) }}°
-        </template>
+    </div>
+
+    <div class="run-body">
+      <p class="muted small run-meta" style="margin: 0">
+        <template v-if="route">{{ route.summary }} · </template>
+        <template v-if="run?.sessionTitle">{{ run.sessionTitle }} · </template>
+        <span v-if="run?.offRoute" class="error">Off route</span>
+        <span v-else-if="tracking" class="success">On route</span>
         <template v-if="liveSpeedLabel">
-          <template v-if="mapHeading != null"> · </template>
-          <span :style="{ color: speedToColor(liveSpeedMps) }">
-            {{ liveSpeedLabel }}
-          </span>
+          ·
+          <span :style="{ color: speedToColor(liveSpeedMps) }">{{ liveSpeedLabel }}</span>
         </template>
-        <template v-if="!lastPoint"> Waiting for GPS… </template>
+        <template v-if="mapHeading != null"> · {{ Math.round(mapHeading) }}°</template>
       </p>
-    </div>
-    <div v-else class="card">
-      <p class="muted small" style="margin: 0">
-        No planned route.
-        <RouterLink to="/plan">Plan a loop</RouterLink>
-        or start a free run.
-      </p>
-    </div>
 
-    <div
-      v-if="tracking && run && runs.runMatchesRoute"
-      class="card"
-      :class="{ 'turn-cue': run.offRoute }"
-    >
-      <div class="card-title">Route status</div>
-      <strong :class="run.offRoute ? 'error' : 'success'">
-        {{ run.offRoute ? 'Off route' : 'On route' }}
-      </strong>
-      <p v-if="runs.liveDistanceToPath != null" class="muted small" style="margin: 0.25rem 0 0">
-        {{ Math.round(runs.liveDistanceToPath) }} m from path
-        · threshold {{ guest.profile.offRouteMeters }} m
-      </p>
-    </div>
+      <div class="speed-legend" aria-label="Speed color legend">
+        <span v-for="s in SPEED_LEGEND" :key="s.label" class="speed-legend-stop">
+          <i :style="{ background: s.color }" />
+          {{ s.label }}
+        </span>
+      </div>
 
-    <div v-if="upcomingTurn" class="card turn-cue">
-      <div class="card-title">Upcoming</div>
-      <strong>{{ upcomingTurn.instruction }}</strong>
-      <p class="muted small" style="margin: 0.25rem 0 0">
-        in {{ Math.round(upcomingTurn.meters) }} m
-      </p>
-    </div>
+      <div v-if="upcomingTurn" class="card turn-cue" style="margin-top: 0.5rem">
+        <strong>{{ upcomingTurn.instruction }}</strong>
+        <span class="muted small"> · {{ Math.round(upcomingTurn.meters) }} m</span>
+      </div>
 
-    <div class="card">
-      <div class="stat-grid">
-        <div class="stat">
-          <div class="stat-label">Time</div>
-          <div class="stat-value">{{ formatDuration(elapsed) }}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">Along route</div>
-          <div class="stat-value">
-            {{ formatDistance(runs.trackedDistanceMeters, guest.unit) }}
+      <div class="card" style="margin-top: 0.5rem">
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="stat-label">Time</div>
+            <div class="stat-value">{{ formatDuration(elapsed) }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Along</div>
+            <div class="stat-value">
+              {{ formatDistance(runs.trackedDistanceMeters, guest.unit) }}
+            </div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Pace</div>
+            <div class="stat-value">{{ formatPace(paceSeconds) }}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Left</div>
+            <div class="stat-value">
+              {{ route ? formatDistance(remaining, guest.unit) : '—' }}
+            </div>
           </div>
         </div>
-        <div class="stat">
-          <div class="stat-label">Pace / {{ guest.unit }}</div>
-          <div class="stat-value">{{ formatPace(paceSeconds) }}</div>
-        </div>
-        <div class="stat">
-          <div class="stat-label">kcal</div>
-          <div class="stat-value">
-            {{ runs.runMatchesRoute ? (run?.estimatedCalories ?? 0) : 0 }}
-          </div>
+        <div v-if="route" class="muted small" style="margin-top: 0.5rem">
+          {{ Math.round(progress * 100) }}%
+          <template v-if="targetPaceDisplay">
+            · target {{ targetPaceDisplay }}/{{ guest.unit }}
+          </template>
         </div>
       </div>
 
-      <div v-if="route" class="muted small" style="margin-top: 0.75rem">
-        Progress {{ Math.round(progress * 100) }}%
-        · remaining {{ formatDistance(remaining, guest.unit) }}
-        · route {{ formatDistance(route.distanceMeters, guest.unit) }}
-      </div>
-      <div v-if="targetPaceDisplay" class="muted small">
-        Target {{ targetPaceDisplay }} / {{ guest.unit }}
-        <template v-if="paceSeconds > 0">
-          · current {{ formatPace(paceSeconds) }}
-        </template>
-      </div>
-    </div>
-
-    <div v-if="run?.splits?.length" class="card">
-      <div class="card-title">Splits</div>
       <div
-        v-for="s in run.splits"
-        :key="s.index"
-        class="list-item"
-        style="padding: 0.4rem 0"
+        v-if="runs.latestNudge"
+        class="nudge"
+        :class="`tone-${runs.latestNudge.tone}`"
+        style="margin: 0.5rem 0"
       >
-        <span class="small">
-          <strong>{{ s.index }}</strong>
-          {{ guest.unit === 'mi' ? 'mi' : 'km' }}
-        </span>
-        <span class="small muted">
-          {{ formatDuration(s.durationSeconds) }}
-          · {{ formatPace(s.paceSecondsPerUnit) }}/{{ guest.unit }}
-        </span>
+        {{ runs.latestNudge.message }}
       </div>
-    </div>
 
-    <div
-      v-if="runs.latestNudge"
-      class="nudge"
-      :class="`tone-${runs.latestNudge.tone}`"
-      style="margin-bottom: 0.85rem"
-    >
-      {{ runs.latestNudge.message }}
-    </div>
-    <div v-else class="card">
-      <p class="muted small" style="margin: 0">Coach is quiet until you start.</p>
-    </div>
+      <div v-if="run?.splits?.length" class="card">
+        <div class="card-title">Splits</div>
+        <div
+          v-for="s in run.splits"
+          :key="s.index"
+          class="list-item"
+          style="padding: 0.35rem 0"
+        >
+          <span class="small"><strong>{{ s.index }}</strong> {{ guest.unit }}</span>
+          <span class="small muted">
+            {{ formatDuration(s.durationSeconds) }}
+            · {{ formatPace(s.paceSecondsPerUnit) }}
+          </span>
+        </div>
+      </div>
 
-    <div v-if="staleRunBanner" class="card">
-      <p class="small" style="margin: 0 0 0.5rem">
-        An unfinished run is saved
-        ({{ formatDistance(staleRunBanner.distanceMeters, guest.unit) }})
-        but it doesn’t match this route. Start fresh or discard it.
-      </p>
-      <div class="row">
-        <button class="btn btn-primary" type="button" style="flex: 1" @click="start({ forceNew: true })">
-          Start fresh
-        </button>
-        <button class="btn btn-danger" type="button" style="flex: 1" @click="discard">
-          Discard old
+      <div v-if="staleRunBanner" class="card">
+        <p class="small" style="margin: 0 0 0.5rem">
+          Unfinished run doesn’t match this route.
+        </p>
+        <div class="row">
+          <button class="btn btn-primary" type="button" style="flex: 1" @click="start({ forceNew: true })">
+            Start fresh
+          </button>
+          <button class="btn btn-danger" type="button" style="flex: 1" @click="discard">
+            Discard
+          </button>
+        </div>
+      </div>
+
+      <div v-else-if="run && runs.runMatchesRoute && !tracking" class="card">
+        <p class="small" style="margin: 0 0 0.5rem">
+          {{ run.routeSummary }} · {{ formatDistance(runs.trackedDistanceMeters, guest.unit) }}
+        </p>
+        <button class="btn btn-primary btn-block" type="button" @click="start({ forceNew: false })">
+          Resume tracking
         </button>
       </div>
-    </div>
 
-    <div
-      v-else-if="run && runs.runMatchesRoute && !tracking"
-      class="card"
-    >
-      <p class="small" style="margin: 0 0 0.5rem">
-        In progress:
-        <strong>{{ run.routeSummary }}</strong>
-        · {{ formatDistance(runs.trackedDistanceMeters, guest.unit) }}
-        · {{ formatDuration(elapsed) }}
+      <p v-if="error" class="error">{{ error }}</p>
+
+      <div class="stack" style="margin-top: 0.5rem">
+        <button
+          v-if="!run || !runs.runMatchesRoute"
+          class="btn btn-primary btn-block"
+          type="button"
+          @click="start({ forceNew: true })"
+        >
+          Start run
+        </button>
+        <template v-else-if="tracking">
+          <button class="btn btn-ghost btn-block" type="button" @click="requestNudge">
+            Nudge me
+          </button>
+          <button class="btn btn-primary btn-block" type="button" @click="finish(false)">
+            Finish &amp; save
+          </button>
+          <button class="btn btn-danger btn-block" type="button" @click="discard">
+            Discard
+          </button>
+        </template>
+        <template v-else>
+          <button class="btn btn-ghost btn-block" type="button" @click="start({ forceNew: true })">
+            Restart from 0
+          </button>
+          <button class="btn btn-danger btn-block" type="button" @click="discard">
+            Discard
+          </button>
+        </template>
+      </div>
+
+      <p class="run-footer muted small">
+        <RouterLink to="/settings">Settings</RouterLink>
+        <template v-if="tracking && wakeActive"> · screen on</template>
+        <template v-if="lastPoint">
+          · GPS ±{{ Math.round(lastPoint.accuracy ?? 0) }}m
+        </template>
       </p>
-      <button class="btn btn-primary btn-block" type="button" @click="start({ forceNew: false })">
-        Resume tracking
-      </button>
-    </div>
-
-    <p v-if="error" class="error">{{ error }}</p>
-    <p v-if="watching && tracking" class="success small">GPS tracking on</p>
-    <p v-if="run && runs.runMatchesRoute && tracking && guest.profile.keepScreenOnDuringRun" class="small" :class="wakeActive ? 'success' : 'muted'">
-      <template v-if="!wakeSupported">Screen wake lock not supported here.</template>
-      <template v-else-if="wakeActive">Screen stays on for this run</template>
-      <template v-else>Trying to keep screen on… (or denied)</template>
-    </p>
-    <p v-if="lastPoint" class="muted small">
-      Last fix ±{{ Math.round(lastPoint.accuracy ?? 0) }}m
-      <template v-if="lastPoint.heading != null">
-        · bearing {{ Math.round(lastPoint.heading) }}°
-      </template>
-    </p>
-
-    <div class="stack">
-      <button
-        v-if="!run || !runs.runMatchesRoute"
-        class="btn btn-primary btn-block"
-        type="button"
-        @click="start({ forceNew: true })"
-      >
-        Start run
-      </button>
-      <template v-else-if="tracking">
-        <button class="btn btn-ghost btn-block" type="button" @click="requestNudge">
-          Nudge me
-        </button>
-        <button class="btn btn-ghost btn-block" type="button" @click="start({ forceNew: true })">
-          Restart from 0
-        </button>
-        <button class="btn btn-primary btn-block" type="button" @click="finish(false)">
-          Finish &amp; save
-        </button>
-        <button class="btn btn-danger btn-block" type="button" @click="discard">
-          Discard
-        </button>
-      </template>
-      <template v-else>
-        <button class="btn btn-ghost btn-block" type="button" @click="start({ forceNew: true })">
-          Restart from 0
-        </button>
-        <button class="btn btn-danger btn-block" type="button" @click="discard">
-          Discard
-        </button>
-      </template>
     </div>
   </section>
 </template>

@@ -155,6 +155,11 @@ export interface RunLog {
   planId: string | null
   planDay: number | null
   sessionTitle: string | null
+  /**
+   * Downsampled GPS trail with speeds for history map (speed gradient).
+   * Kept smaller than full samples.
+   */
+  trailSnapshot?: GeoPoint[]
 }
 
 export interface StartRunOptions {

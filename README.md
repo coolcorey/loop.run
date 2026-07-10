@@ -15,7 +15,7 @@ npm install
 npm run dev
 ```
 
-- Web (desktop): https://localhost:5173 (dev uses a self-signed cert)  
+- Web (desktop): https://localhost:9090 (dev uses a self-signed cert)  
 - Web (phone on LAN): use the **https://192.168.…** URL Vite prints — accept the cert warning  
 - API: http://127.0.0.1:8787 (`/api/health`)
 

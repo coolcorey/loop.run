@@ -415,11 +415,13 @@ export const useRunsStore = defineStore('runs', () => {
     if (!run) return
     run.finishedAt = new Date().toISOString()
     run.completed = completed || run.loopCompleted
+    // Keep a denser trail snapshot for history speed-map (with speeds)
+    run.trailSnapshot = downsampleTrail(run.samples, 180)
     const archived: RunLog = {
       ...run,
       samples:
-        run.samples.length > 200
-          ? downsample(run.samples, 200)
+        run.samples.length > 120
+          ? downsampleTrail(run.samples, 120)
           : run.samples,
     }
     history.value = [archived, ...history.value].slice(0, 100)
@@ -465,12 +467,14 @@ export const useRunsStore = defineStore('runs', () => {
   }
 })
 
-function downsample(points: GeoPoint[], max: number): GeoPoint[] {
-  if (points.length <= max) return points
+/** Evenly sample trail points, preserving speed for gradient maps */
+function downsampleTrail(points: GeoPoint[], max: number): GeoPoint[] {
+  if (points.length <= max) return points.map((p) => ({ ...p }))
   const out: GeoPoint[] = []
   const step = (points.length - 1) / (max - 1)
   for (let i = 0; i < max; i++) {
-    out.push(points[Math.round(i * step)])
+    const p = points[Math.round(i * step)]
+    out.push({ ...p })
   }
   return out
 }

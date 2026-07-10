@@ -122,7 +122,52 @@ button {
 
 .main {
   flex: 1;
-  padding: 1rem 1rem calc(var(--nav-h) + 1.25rem);
+  padding: 0.65rem 0.75rem calc(var(--nav-h) + 0.85rem);
+}
+
+/* Run page: edge-to-edge map, tighter body */
+.run-page {
+  margin: -0.65rem -0.75rem 0;
+}
+
+.run-map-wrap {
+  position: relative;
+  width: 100%;
+  background: #0b0f14;
+}
+
+.run-map-empty {
+  min-height: 40dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.run-map-overlay {
+  position: absolute;
+  left: 0.5rem;
+  bottom: 0.5rem;
+  z-index: 2;
+}
+
+.run-body {
+  padding: 0.55rem 0.75rem 0;
+}
+
+.run-meta {
+  line-height: 1.35;
+}
+
+.run-footer {
+  margin: 1rem 0 0.25rem;
+  text-align: center;
+}
+
+/* Plan / History maps keep rounded card look */
+.card .route-map {
+  border-radius: 10px;
+  border: 1px solid var(--border);
 }
 
 .bottom-nav {

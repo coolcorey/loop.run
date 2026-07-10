@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import RouteMap from '@/components/RouteMap.vue'
 import { useGuestStore } from '@/stores/guest'
 import { useRunsStore } from '@/stores/runs'
 import { formatDistance, formatDuration, formatPace, fromMeters } from '@/services/geo'
+import { SPEED_LEGEND } from '@/services/speedColor'
 import type { RunLog } from '@/types'
 
 const guest = useGuestStore()
@@ -16,19 +18,28 @@ function paceFor(run: RunLog) {
   if (d <= 0) return 0
   return run.durationSeconds / d
 }
+
+function trailFor(run: RunLog) {
+  return run.trailSnapshot?.length ? run.trailSnapshot : run.samples
+}
+
+function pathFor(run: RunLog) {
+  if (!run.routeId) return trailFor(run)
+  const r = runs.routes.find((x) => x.id === run.routeId)
+  return r?.path?.length ? r.path : trailFor(run)
+}
 </script>
 
 <template>
   <section>
-    <h1>History</h1>
-    <p class="lede">Runs saved on this device (guest mode).</p>
+    <p class="lede" style="margin-top: 0">Runs on this device.</p>
 
-    <div v-if="runs.history.length" class="card">
+    <div v-if="runs.history.length" class="stack">
       <div
         v-for="run in runs.history"
         :key="run.id"
-        class="list-item"
-        style="flex-direction: column; align-items: stretch"
+        class="card"
+        style="margin-bottom: 0"
       >
         <div class="row" style="justify-content: space-between">
           <strong>{{ run.routeSummary }}</strong>
@@ -39,7 +50,34 @@ function paceFor(run: RunLog) {
         <div class="muted small">
           {{ new Date(run.startedAt).toLocaleString() }}
         </div>
-        <div class="stat-grid" style="margin-top: 0.5rem">
+
+        <RouteMap
+          v-if="trailFor(run).length > 1 || pathFor(run).length > 1"
+          style="margin-top: 0.65rem"
+          height="180px"
+          high-contrast-path
+          mode="overview"
+          :path="pathFor(run)"
+          :trail="trailFor(run)"
+          :interactive="false"
+        />
+
+        <div
+          v-if="trailFor(run).length > 1"
+          class="speed-legend"
+          style="margin-top: 0.4rem"
+        >
+          <span
+            v-for="s in SPEED_LEGEND"
+            :key="s.label"
+            class="speed-legend-stop"
+          >
+            <i :style="{ background: s.color }" />
+            {{ s.label }}
+          </span>
+        </div>
+
+        <div class="stat-grid" style="margin-top: 0.65rem">
           <div class="stat">
             <div class="stat-label">Distance</div>
             <div class="stat-value" style="font-size: 1rem">
@@ -71,9 +109,6 @@ function paceFor(run: RunLog) {
             {{ s.index }}={{ formatPace(s.paceSecondsPerUnit) }}
             <template v-if="s.index < run.splits.length"> · </template>
           </span>
-        </p>
-        <p v-if="run.nudges?.length" class="muted small" style="margin: 0.25rem 0 0">
-          {{ run.nudges.length }} coach nudges
         </p>
       </div>
     </div>
