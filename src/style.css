@@ -444,3 +444,26 @@ code {
   }
 }
 
+.speed-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.65rem;
+  margin-top: 0.5rem;
+  justify-content: center;
+}
+
+.speed-legend-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.speed-legend-stop i {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.35rem;
+  border-radius: 2px;
+}
+

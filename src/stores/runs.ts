@@ -324,8 +324,16 @@ export const useRunsStore = defineStore('runs', () => {
       }
 
       if (dist < 1.5) {
-        samples[samples.length - 1] = point
+        samples[samples.length - 1] = {
+          ...point,
+          speed: point.speed ?? prev.speed,
+        }
         return { accepted: false, reason: 'noise' as const }
+      }
+
+      // Prefer device speed; fall back to ground speed for trail coloring
+      if (point.speed == null || !Number.isFinite(point.speed)) {
+        point = { ...point, speed: dist / (dtMs / 1000) }
       }
 
       run.distanceMeters += dist

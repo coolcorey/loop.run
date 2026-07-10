@@ -27,6 +27,7 @@ import { useGuestStore } from '@/stores/guest'
 import { usePlansStore } from '@/stores/plans'
 import { useRunsStore } from '@/stores/runs'
 import { resolveHeading } from '@/services/bearing'
+import { SPEED_LEGEND, speedToColor } from '@/services/speedColor'
 import type { CoachContext, GeoPoint } from '@/types'
 
 const guest = useGuestStore()
@@ -42,6 +43,7 @@ const lastPoint = ref<GeoPoint | null>(null)
 const mapHeading = ref<number | null>(null)
 /** Heading-up (course up) vs north-up */
 const headingUp = ref(true)
+
 const wakeSupported = isWakeLockSupported()
 const wakeActive = ref(false)
 const lastSplitCount = ref(0)
@@ -56,6 +58,33 @@ const lastOffRouteSpoken = ref(false)
 
 const run = computed(() => runs.activeRun)
 const route = computed(() => runs.activeRoute)
+
+const trailSamples = computed(() => run.value?.samples ?? [])
+
+const liveSpeedMps = computed(() => {
+  const p = lastPoint.value
+  if (p?.speed != null && Number.isFinite(p.speed) && p.speed >= 0) {
+    return p.speed
+  }
+  const samples = trailSamples.value
+  if (samples.length < 2) return null
+  const a = samples[samples.length - 2]
+  const b = samples[samples.length - 1]
+  const dist = haversineMeters(a, b)
+  const dt = ((b.timestamp ?? 0) - (a.timestamp ?? 0)) / 1000
+  if (dt <= 0) return null
+  return dist / dt
+})
+
+const liveSpeedLabel = computed(() => {
+  const s = liveSpeedMps.value
+  if (s == null) return null
+  const unit = guest.unit
+  if (unit === 'mi') {
+    return `${(s * 2.23694).toFixed(1)} mph`
+  }
+  return `${(s * 3.6).toFixed(1)} km/h`
+})
 
 const elapsed = computed(() => {
   if (!run.value) return 0
@@ -415,11 +444,22 @@ onBeforeUnmount(() => {
       <RouteMap
         :path="route.path"
         :user="lastPoint"
+        :trail="trailSamples"
         :heading="mapHeading"
         :heading-up="headingUp"
         mode="follow"
-        height="260px"
+        height="280px"
       />
+      <div class="speed-legend" aria-label="Speed color legend">
+        <span
+          v-for="s in SPEED_LEGEND"
+          :key="s.label"
+          class="speed-legend-stop"
+        >
+          <i :style="{ background: s.color }" />
+          {{ s.label }}
+        </span>
+      </div>
       <div class="row" style="margin-top: 0.55rem; justify-content: space-between">
         <span class="muted small">Map orientation</span>
         <div class="seg">
@@ -439,8 +479,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <p v-if="mapHeading != null" class="muted small" style="margin: 0.35rem 0 0">
-        Bearing {{ Math.round(mapHeading) }}°
+      <p class="muted small" style="margin: 0.35rem 0 0">
+        <template v-if="mapHeading != null">
+          Bearing {{ Math.round(mapHeading) }}°
+        </template>
+        <template v-if="liveSpeedLabel">
+          <template v-if="mapHeading != null"> · </template>
+          <span :style="{ color: speedToColor(liveSpeedMps) }">
+            {{ liveSpeedLabel }}
+          </span>
+        </template>
+        <template v-if="!lastPoint"> Waiting for GPS… </template>
       </p>
     </div>
     <div v-else class="card">
