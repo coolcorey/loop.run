@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import type { DistanceUnit, GuestProfile } from '@/types'
+import type { CoachVoiceMode, DistanceUnit, GuestProfile } from '@/types'
 import { loadJson, saveJson, uid } from '@/services/storage'
 
 const STORAGE_KEY = 'loop.guest'
@@ -24,6 +24,8 @@ function defaultProfile(): GuestProfile {
     autoSplitCommentary: true,
     autoMilestones: true,
     autoSessionBrief: true,
+    coachVoice: 'coach',
+    localColor: true,
   }
 }
 
@@ -44,6 +46,8 @@ function migrateProfile(raw: Partial<GuestProfile> | null): GuestProfile {
     autoSplitCommentary: raw.autoSplitCommentary ?? true,
     autoMilestones: raw.autoMilestones ?? true,
     autoSessionBrief: raw.autoSessionBrief ?? true,
+    coachVoice: raw.coachVoice ?? 'coach',
+    localColor: raw.localColor ?? true,
   }
 }
 
@@ -120,6 +124,14 @@ export const useGuestStore = defineStore('guest', () => {
     profile.value.autoSessionBrief = on
   }
 
+  function setCoachVoice(mode: CoachVoiceMode) {
+    profile.value.coachVoice = mode
+  }
+
+  function setLocalColor(on: boolean) {
+    profile.value.localColor = on
+  }
+
   return {
     profile,
     unit,
@@ -138,5 +150,7 @@ export const useGuestStore = defineStore('guest', () => {
     setAutoSplitCommentary,
     setAutoMilestones,
     setAutoSessionBrief,
+    setCoachVoice,
+    setLocalColor,
   }
 })

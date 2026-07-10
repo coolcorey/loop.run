@@ -89,6 +89,15 @@ export interface TrainingSession {
   isRest?: boolean
 }
 
+/** Personality for coach TTS / AI prompts */
+export type CoachVoiceMode =
+  | 'coach'
+  | 'jerk'
+  | 'drill'
+  | 'zen'
+  | 'hype'
+  | 'silent'
+
 export interface CoachContext {
   /** current speed m/s */
   speedMps: number | null
@@ -101,6 +110,11 @@ export interface CoachContext {
   progress: number
   phase: 'warmup' | 'steady' | 'push' | 'finish'
   offRoute?: boolean
+  voiceMode?: CoachVoiceMode
+  /** Reverse-geocoded or cached place label for local-color lines */
+  placeLabel?: string | null
+  /** Ask model to invent a short “look left and you’ll see…” beat */
+  includeLocalColor?: boolean
 }
 
 export interface CoachNudge {
@@ -211,4 +225,8 @@ export interface GuestProfile {
   autoMilestones: boolean
   /** Speak brief when starting a train session */
   autoSessionBrief: boolean
+  /** Coach personality */
+  coachVoice: CoachVoiceMode
+  /** Occasional made-up local color using reverse geocode + AI/local voice */
+  localColor: boolean
 }

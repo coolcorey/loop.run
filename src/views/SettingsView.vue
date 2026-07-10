@@ -12,8 +12,10 @@ import {
 } from '@/services/voice'
 import { isWakeLockSupported } from '@/services/wakeLock'
 import { geoDiagnostics, getCurrentPosition, isSecureGeoContext } from '@/services/geo'
+import { COACH_VOICE_OPTIONS } from '@/services/coachVoices'
 
 const guest = useGuestStore()
+const coachVoices = COACH_VOICE_OPTIONS
 const pbReady = isPocketBaseConfigured()
 const health = ref<ApiHealth | null>(null)
 const healthError = ref<string | null>(null)
@@ -181,6 +183,29 @@ function testVoice() {
       <p class="muted small" style="margin: 0">
         Quiet automation — no extra screens. Ideas list: <code>docs/AI_IDEAS.md</code>.
       </p>
+      <div class="field">
+        <label>Coach voice</label>
+        <select
+          :value="guest.profile.coachVoice"
+          @change="guest.setCoachVoice(($event.target as HTMLSelectElement).value as any)"
+        >
+          <option v-for="o in coachVoices" :key="o.id" :value="o.id">
+            {{ o.label }} — {{ o.blurb }}
+          </option>
+        </select>
+      </div>
+      <div class="row" style="justify-content: space-between">
+        <div>
+          <span class="small">Local color</span>
+          <p class="muted small" style="margin: 0.15rem 0 0; max-width: 14rem">
+            Occasional “look left…” bits using nearby place names (invented flavor in that voice).
+          </p>
+        </div>
+        <div class="seg">
+          <button type="button" :class="{ active: guest.profile.localColor }" @click="guest.setLocalColor(true)">On</button>
+          <button type="button" :class="{ active: !guest.profile.localColor }" @click="guest.setLocalColor(false)">Off</button>
+        </div>
+      </div>
       <div class="field">
         <label>Athlete notes (injury, fatigue, prefs)</label>
         <textarea

@@ -2,6 +2,23 @@
 
 Product-shaped ideas for Grok / xAI in Loop. Not generic fitness-chatbot fluff.
 
+## Coach voice modes + local color
+
+Settings → **Coach voice** + **Local color**.
+
+| Mode | Vibe |
+|------|------|
+| Coach | Default, useful — **not** comedy |
+| Jerk | Mean, sweary roast comedy; savage “look left…” fiction |
+| Drill sergeant | Absurd barked military comedy |
+| Zen | Deadpan spiritual comedy |
+| Hype | Ridiculous stadium-announcer comedy |
+| Silent | No coach speech |
+
+**Local color:** reverse-geocode (street/area name) + invent short ambient/roast lines **in the chosen voice**. Pattern: “If you look to your left you will see…” plus made-up area fiction (Jerk roasts, Drill barks landmarks, Zen soft notice, Hype stadium callout, Coach useful cue). Not real private addresses. Occasional (e.g. every 3rd auto-nudge) to limit cost/rate limits. Settings → **Local color** Off disables entirely.
+
+---
+
 ## Shipped / shipping (1–6, quiet UI)
 
 These run **automatically** or live under **Settings → Coach & AI**. No extra screens.

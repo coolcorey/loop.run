@@ -10,6 +10,31 @@ import { distanceForCalories } from './geo.js'
 import { planRoadLoop } from './routing.js'
 import { parseJsonLoose, xaiChat, xaiConfigured, XaiError } from './xai.js'
 
+function voiceModeAddon(mode?: string): string {
+  switch (mode) {
+    case 'jerk':
+      return `VOICE: JERK COMEDY. Mean sports-roast. Swear freely (fuck, shit, ass, damn, hell, bullshit, bastard). Savage, funny, contemptuous. One sentence. Roast laziness/pace/quitting/"fitness journey" — not identity hate. No slurs, no self-harm, not minors.
+LOCAL COLOR: made-up look left/right/ahead/behind near {placeLabel} that roasts them. Invent NEW. Examples of tone only:
+- "If you look left near East Cesar Chavez you'll see people who aren't gasping like your slow ass."
+- "Look right by Lady Bird Lake — a fucking shrine to runners who finished before you thought about walking."
+Never real private addresses. The joke is required when local color is on.`
+    case 'drill':
+      return `VOICE: DRILL SERGEANT COMEDY. Barked ALL-CAPS-friendly orders with absurd military theater (funny Full Metal Jacket energy). Invent ridiculous cadences, enemy sofas, traitor sidewalks, imaginary medals. One short command. Funny first, still sergeant-shaped.
+LOCAL COLOR: "LEFT — {place} — [absurd barked landmark]. HOLD FORM." Invent fresh. No slurs, no self-harm, not minors.`
+    case 'zen':
+      return `VOICE: ZEN COMEDY. Calm, spare, deadpan — but funny. Soft spiritual nonsense that gently mocks striving and running culture while sounding peaceful. Ironic koans, absurd mindfulness. Not sincere wellness brochure copy. One sentence.
+LOCAL COLOR: "If you glance left near {place}, notice…" invent gently absurd ambient fiction. No slurs, no self-harm, not minors.`
+    case 'hype':
+      return `VOICE: HYPE COMEDY. Stadium announcer treating a neighborhood jog like the Super Bowl. Ridiculous hyperbole, fake crowd energy, absurd heroic claims. Caps welcome. One sentence. Funny bombast, not bland cheerleading.
+LOCAL COLOR: "LOOK LEFT AT {place} — [absurd legendary claim]!" Invent fresh. No slurs, no self-harm, not minors.`
+    case 'silent':
+      return `VOICE: SILENT. Minimal empty message.`
+    default:
+      return `VOICE: COACH. Direct, useful, not cheesy, NOT comedic. One practical sentence.
+LOCAL COLOR: brief useful landmark cue only — helpful, not jokes.`
+  }
+}
+
 loadEnvFile()
 
 const app = new Hono()
@@ -290,6 +315,9 @@ app.post('/api/ai/coach-nudge', async (c) => {
       progress: number
       phase: string
       offRoute?: boolean
+      voiceMode?: string
+      placeLabel?: string | null
+      includeLocalColor?: boolean
     }>()
 
     if (!xaiConfigured()) {
@@ -299,14 +327,29 @@ app.post('/api/ai/coach-nudge', async (c) => {
       )
     }
 
+    const wantLocal =
+      Boolean(body.includeLocalColor) && Boolean(body.placeLabel)
+
+    const localRule = wantLocal
+      ? `CRITICAL: includeLocalColor is ON and placeLabel is "${body.placeLabel}". Your message MUST invent a short fictional local beat in the active voice using look left / look right / ahead / behind + that place name. Do NOT only name-drop the street while coaching pace. The local invented fact is the star of the sentence. Never invent real private addresses of real people.`
+      : `includeLocalColor is off or placeLabel missing — do NOT invent location fiction; coach effort/pace/route only.`
+
     const raw = await xaiChat({
-      system: `You are Loop's in-run voice coach. Short, spicy, not cheesy. One sentence max.
+      system: `You are Loop's in-run voice coach. One sentence max for TTS over music.
 Reply JSON only: {"message":string,"tone":"encourage"|"ease"|"push"|"info"|"celebrate"}
-Tone guide: push = speed up, ease = slow down, encourage = hold, celebrate = finish energy.
-If offRoute is true, tell them to get back on the path. If targetSpeedMps is set, coach vs that pace.`,
+Tone guide: push = speed up, ease = slow down, encourage = hold, celebrate = finish, info = neutral/roast.
+If offRoute is true, get them back on path (in voice). Pace numbers are optional spice, not the whole line.
+${voiceModeAddon(body.voiceMode)}
+${localRule}`,
       user: JSON.stringify(body),
       json: true,
-      temperature: 0.7,
+      temperature: (() => {
+        const m = body.voiceMode
+        // Comedy voices run hotter for invention
+        if (m === 'jerk' || m === 'hype' || m === 'drill' || m === 'zen') return 0.95
+        if (wantLocal) return 0.8
+        return 0.65
+      })(),
     })
 
     const parsed = parseJsonLoose<{ message?: string; tone?: string }>(raw)
@@ -355,7 +398,8 @@ app.post('/api/ai/debrief', async (c) => {
 - headline: max 8 words
 - bullets: exactly 3 short coaching points (what went well, one fix, next focus)
 - speak: one sentence to say aloud (max 20 words)
-Respect athlete notes (injury/fatigue) if present. Be direct, not cheesy.`,
+Respect athlete notes (injury/fatigue) if present.
+${voiceModeAddon((body as { voiceMode?: string }).voiceMode)}`,
       user: JSON.stringify(body),
       json: true,
       temperature: 0.55,

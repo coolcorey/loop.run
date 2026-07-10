@@ -5,6 +5,7 @@ export async function fetchDebrief(input: {
   run: RunLog
   unit: 'mi' | 'km'
   athleteNotes?: string
+  voiceMode?: string
 }): Promise<RunDebrief | null> {
   try {
     const d = await apiFetch<RunDebrief>('/api/ai/debrief', {
@@ -23,6 +24,7 @@ export async function fetchDebrief(input: {
         unit: input.unit,
         athleteNotes: input.athleteNotes || undefined,
         freeRun: input.run.routeId == null,
+        voiceMode: input.voiceMode || 'coach',
       }),
     })
     return d
@@ -55,30 +57,35 @@ export async function fetchSessionBrief(input: {
   }
 }
 
+import {
+  localMilestoneLine as voiceMilestone,
+  localSplitLine,
+} from '@/services/coachVoices'
+import type { CoachVoiceMode } from '@/types'
+
 /** Local split line — no network, works offline */
 export function localSplitCommentary(input: {
   splitIndex: number
   paceSecondsPerUnit: number
   targetPaceSecondsPerUnit?: number | null
   unit: 'mi' | 'km'
+  voiceMode?: CoachVoiceMode
 }): string {
   const pace = input.paceSecondsPerUnit
   const target = input.targetPaceSecondsPerUnit
+  let vs: 'slow' | 'fast' | 'on' | 'none' = 'none'
   if (target && target > 0) {
     const delta = pace - target
-    if (delta > 12) {
-      return `Split ${input.splitIndex}. A bit slow of target — settle in.`
-    }
-    if (delta < -12) {
-      return `Split ${input.splitIndex}. Hot vs target — ease a touch.`
-    }
-    return `Split ${input.splitIndex}. Right on target. Hold.`
+    if (delta > 12) vs = 'slow'
+    else if (delta < -12) vs = 'fast'
+    else vs = 'on'
   }
-  return `Split ${input.splitIndex}. Keep it honest.`
+  return localSplitLine(input.voiceMode || 'coach', input.splitIndex, vs)
 }
 
-export function localMilestoneLine(pct: number): string {
-  if (pct <= 0.3) return 'Quarter done. Smooth and steady.'
-  if (pct <= 0.55) return 'Halfway. Stay tall.'
-  return 'Three quarters. Finish strong.'
+export function localMilestoneLine(
+  pct: number,
+  voiceMode: CoachVoiceMode = 'coach',
+): string {
+  return voiceMilestone(voiceMode, pct)
 }

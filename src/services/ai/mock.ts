@@ -1,5 +1,6 @@
 import type { AiProvider, GeneratePlanInput, PlanRouteInput } from './types'
 import type { CoachContext, CoachNudge, PlannedRoute, TrainingPlan } from '@/types'
+import { localNudgeLine } from '@/services/coachVoices'
 import {
   distanceForCalories,
   estimateCalories,
@@ -125,23 +126,21 @@ export const mockAi: AiProvider = {
   async coachNudge(ctx: CoachContext): Promise<CoachNudge> {
     await delay(40)
     const phase = ctx.phase || phaseFromProgress(ctx.progress)
-    let message: string
+    const mode = ctx.voiceMode || 'coach'
+    const place =
+      ctx.includeLocalColor && ctx.placeLabel ? ctx.placeLabel : null
+    let message = localNudgeLine(mode, { ...ctx, phase }, place)
     let tone: CoachNudge['tone'] = 'info'
 
     const speed = ctx.speedMps
     const target = ctx.targetSpeedMps
-    const remainingMi = ctx.distanceRemainingMeters / 1609.344
 
-    if (ctx.offRoute) {
-      message = 'Off the path — ease back to the route line.'
+    if (mode === 'silent') {
+      message = ''
       tone = 'info'
-    } else if (phase === 'warmup') {
-      message = 'Ease in. Find your rhythm for the first few minutes.'
-      tone = 'ease'
-    } else if (phase === 'finish' || remainingMi < 0.3) {
-      message = "Last stretch — if you've got gas, open it up."
-      tone = 'push'
-    } else if (speed != null && target != null && target > 0) {
+    } else if (ctx.offRoute) {
+      tone = mode === 'jerk' ? 'info' : 'info'
+    } else if (speed != null && target != null && target > 0 && mode === 'coach' && !place) {
       const ratio = speed / target
       if (ratio < 0.9) {
         message = 'A little quicker toward your target pace.'
@@ -153,11 +152,17 @@ export const mockAi: AiProvider = {
         message = 'Locked on target pace. Hold this.'
         tone = 'encourage'
       }
-    } else if (phase === 'push') {
-      message = 'Final quarter of the loop. Stay tall, stay smooth.'
+    } else if (mode === 'jerk') {
+      tone = 'info'
+    } else if (mode === 'drill') {
+      tone = 'push'
+    } else if (mode === 'zen') {
+      tone = 'ease'
+    } else if (mode === 'hype') {
+      tone = 'celebrate'
+    } else if (phase === 'finish') {
       tone = 'push'
     } else {
-      message = 'Steady. Check your shoulders — relax them.'
       tone = 'encourage'
     }
 

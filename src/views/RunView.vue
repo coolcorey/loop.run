@@ -31,6 +31,7 @@ import {
   localMilestoneLine,
   localSplitCommentary,
 } from '@/services/ai/extra'
+import { reverseGeocodeLabel } from '@/services/place'
 import { SPEED_LEGEND, speedToColor } from '@/services/speedColor'
 import type { CoachContext, GeoPoint } from '@/types'
 
@@ -61,6 +62,9 @@ const lastSpokenCoach = ref<string | null>(null)
 const lastOffRouteSpoken = ref(false)
 /** Highest milestone spoken: 0 | 0.25 | 0.5 | 0.75 */
 const lastMilestone = ref(0)
+/** Every Nth auto-nudge gets local-color (place + invent) */
+let autoNudgeCount = 0
+const placeLabel = ref<string | null>(null)
 
 const run = computed(() => runs.activeRun)
 const route = computed(() => runs.activeRoute)
@@ -152,6 +156,7 @@ function voiceOpts() {
 
 function speakCoach(message: string) {
   if (!guest.profile.voiceEnabled || !guest.profile.voiceCoach) return
+  if (guest.profile.coachVoice === 'silent') return
   if (!message || message === lastSpokenCoach.value) return
   lastSpokenCoach.value = message
   speak(message, voiceOpts())
@@ -174,6 +179,7 @@ function coachPhase(p: number): CoachContext['phase'] {
 async function requestNudge(opts: { manual?: boolean } = {}) {
   if (!run.value || !tracking.value) return
   if (nudging.value) return
+  if (guest.profile.coachVoice === 'silent' && !opts.manual) return
 
   if (run.value.offRoute) {
     speakCoach('You are off the path. Head back to the route.')
@@ -181,6 +187,22 @@ async function requestNudge(opts: { manual?: boolean } = {}) {
   }
 
   nudging.value = true
+  if (!opts.manual) autoNudgeCount++
+
+  // Refresh place label occasionally for local-color lines
+  const wantColor =
+    guest.profile.localColor &&
+    (opts.manual || autoNudgeCount % 3 === 0) &&
+    lastPoint.value
+
+  if (wantColor && lastPoint.value) {
+    const label = await reverseGeocodeLabel(
+      lastPoint.value.lat,
+      lastPoint.value.lng,
+    )
+    if (label) placeLabel.value = label
+  }
+
   const ctx: CoachContext = {
     speedMps: lastPoint.value?.speed ?? run.value.avgSpeedMps,
     targetSpeedMps: run.value.targetSpeedMps,
@@ -190,6 +212,9 @@ async function requestNudge(opts: { manual?: boolean } = {}) {
     progress: progress.value,
     phase: coachPhase(progress.value),
     offRoute: run.value.offRoute,
+    voiceMode: guest.profile.coachVoice,
+    placeLabel: placeLabel.value,
+    includeLocalColor: Boolean(wantColor && placeLabel.value),
   }
 
   try {
@@ -370,11 +395,16 @@ async function finish(auto = false) {
         run: archived,
         unit: guest.unit,
         athleteNotes: guest.profile.athleteNotes || undefined,
+        voiceMode: guest.profile.coachVoice,
       })
       if (!d) return
       runs.attachDebrief(d)
-      if (guest.profile.voiceEnabled && guest.profile.voiceCoach && d.speak) {
-        // slight delay so finish line speaks first
+      if (
+        guest.profile.voiceEnabled &&
+        guest.profile.voiceCoach &&
+        guest.profile.coachVoice !== 'silent' &&
+        d.speak
+      ) {
         window.setTimeout(() => speak(d.speak, voiceOpts()), 1600)
       }
     })()
@@ -419,20 +449,19 @@ watch(
     const split = run.value?.splits[n - 1]
     lastSplitCount.value = n
     if (!split || !guest.profile.voiceEnabled) return
+    if (guest.profile.coachVoice === 'silent') return
     if (guest.profile.autoSplitCommentary) {
       const targetPace = run.value?.targetSpeedMps
-        ? // m/s → sec per unit
-          (guest.unit === 'mi' ? 1609.344 : 1000) / run.value.targetSpeedMps
+        ? (guest.unit === 'mi' ? 1609.344 : 1000) / run.value.targetSpeedMps
         : null
-      speak(
-        localSplitCommentary({
-          splitIndex: split.index,
-          paceSecondsPerUnit: split.paceSecondsPerUnit,
-          targetPaceSecondsPerUnit: targetPace,
-          unit: guest.unit,
-        }),
-        voiceOpts(),
-      )
+      const line = localSplitCommentary({
+        splitIndex: split.index,
+        paceSecondsPerUnit: split.paceSecondsPerUnit,
+        targetPaceSecondsPerUnit: targetPace,
+        unit: guest.unit,
+        voiceMode: guest.profile.coachVoice,
+      })
+      if (line) speak(line, voiceOpts())
     } else {
       speak(
         `Split ${split.index}. Pace ${formatPace(split.paceSecondsPerUnit)} per ${guest.unit}.`,
@@ -446,12 +475,14 @@ watch(
   () => progress.value,
   (p) => {
     if (!tracking.value || !guest.profile.voiceEnabled) return
+    if (guest.profile.coachVoice === 'silent') return
     if (!guest.profile.autoMilestones || !route.value) return
     const marks = [0.25, 0.5, 0.75] as const
     for (const m of marks) {
       if (p >= m && lastMilestone.value < m) {
         lastMilestone.value = m
-        speak(localMilestoneLine(m), voiceOpts())
+        const line = localMilestoneLine(m, guest.profile.coachVoice)
+        if (line) speak(line, voiceOpts())
         break
       }
     }
