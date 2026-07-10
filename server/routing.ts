@@ -86,24 +86,35 @@ async function routeOrs(points: Point[]): Promise<{
   const key = env('ORS_API_KEY')
   if (!key) return null
 
+  // GeoJSON endpoint wants Accept: application/geo+json (application/json → 406)
   const url =
     'https://api.openrouteservice.org/v2/directions/foot-walking/geojson'
   const body = {
     coordinates: points.map((p) => [p.lng, p.lat]),
     instructions: true,
     elevation: false,
+    // Foot profile already excludes motorways. avoid_features "highways" is
+    // driving-only on public ORS; use foot-safe avoids instead.
+    options: {
+      avoid_features: ['ferries', 'fords'] as string[],
+    },
   }
   const res = await fetch(url, {
     method: 'POST',
     headers: {
       Authorization: key,
       'Content-Type': 'application/json',
-      Accept: 'application/json',
+      Accept: 'application/geo+json, application/json',
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(25_000),
   })
-  if (!res.ok) return null
+  if (!res.ok) {
+    if (env('DEBUG_ROUTING') === '1') {
+      console.warn('[ors]', res.status, await res.text().catch(() => ''))
+    }
+    return null
+  }
   const data = (await res.json()) as {
     features?: {
       geometry?: { coordinates: [number, number][] }
