@@ -1,6 +1,10 @@
 import { serve } from '@hono/node-server'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { existsSync, readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadEnvFile, env } from './env.js'
 import { distanceForCalories } from './geo.js'
 import { planRoadLoop } from './routing.js'
@@ -10,6 +14,12 @@ loadEnvFile()
 
 const app = new Hono()
 const port = Number(env('PORT', '8787'))
+// App Platform / containers must bind all interfaces (not 127.0.0.1 only)
+const hostname = env('HOST', '0.0.0.0')
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const distDir = join(__dirname, '..', 'dist')
+const hasDist = existsSync(join(distDir, 'index.html'))
 
 app.use(
   '*',
@@ -311,6 +321,35 @@ If offRoute is true, tell them to get back on the path. If targetSpeedMps is set
   }
 })
 
-console.log(`[loop.run api] http://127.0.0.1:${port}  xai=${xaiConfigured()}`)
+// Production: serve Vite build + SPA fallback (DigitalOcean App Platform, etc.)
+if (hasDist) {
+  app.use(
+    '/*',
+    serveStatic({
+      root: './dist',
+    }),
+  )
+  app.get('*', (c) => {
+    // Don't swallow API 404s as HTML
+    if (c.req.path.startsWith('/api')) {
+      return c.json({ error: 'Not found' }, 404)
+    }
+    const html = readFileSync(join(distDir, 'index.html'), 'utf8')
+    return c.html(html)
+  })
+} else {
+  app.get('/', (c) =>
+    c.json({
+      ok: true,
+      service: 'loop.run api',
+      note: 'No dist/ found — API only. Run npm run build for full app.',
+      health: '/api/health',
+    }),
+  )
+}
 
-serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
+console.log(
+  `[loop.run] http://${hostname}:${port}  xai=${xaiConfigured()}  static=${hasDist}`,
+)
+
+serve({ fetch: app.fetch, port, hostname })
