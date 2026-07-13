@@ -164,9 +164,12 @@ function speakCoach(message: string) {
 
 function speakTurn(instruction: string, meters: number) {
   if (!guest.profile.voiceEnabled || !guest.profile.voiceTurns) return
+  // Strip trailing punctuation so we don't get "Turn right.. in 40 meters"
+  const cue = instruction.replace(/[.!]+$/g, '').trim()
+  if (!cue) return
   const dist =
     meters < 25 ? 'now' : `in ${Math.round(meters)} meters`
-  speak(`${instruction}. ${dist}`, voiceOpts())
+  speak(`${cue}. ${dist}`, voiceOpts())
 }
 
 function coachPhase(p: number): CoachContext['phase'] {

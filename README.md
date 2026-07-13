@@ -44,7 +44,7 @@ Without `XAI_API_KEY`, road routing still works; AI features fall back to mock.
 | **Maps** | MapLibre + free OSM-style tiles (OpenFreeMap) |
 | **Routing** | Closed road loop via OSRM foot (or ORS if keyed) |
 | **xAI** | Route summary/notes, training plans, in-run nudges |
-| **Voice** | Free browser TTS for coach + turns (Settings) |
+| **Voice** | Free browser TTS; optional Grok AI voice (Settings, default off) |
 | **Guest mode** | Plans/runs in localStorage |
 | **Turn cues** | Close announce distance (default 40m, configurable) |
 
@@ -77,6 +77,7 @@ server/
 ## API
 
 - `GET  /api/health`
+- `POST /api/tts` — Grok TTS proxy (MP3; optional AI voice)
 - `POST /api/route/loop` — road-snapped loop + optional xAI title/notes
 - `POST /api/ai/training-plan`
 - `POST /api/ai/coach-nudge`

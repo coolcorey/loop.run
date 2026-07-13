@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { CoachVoiceMode, DistanceUnit, GuestProfile } from '@/types'
 import { loadJson, saveJson, uid } from '@/services/storage'
+import { configureVoice } from '@/services/voice'
 
 const STORAGE_KEY = 'loop.guest'
 
@@ -17,6 +18,8 @@ function defaultProfile(): GuestProfile {
     voiceCoach: true,
     voiceTurns: true,
     voiceRate: 1.05,
+    aiVoice: false,
+    aiVoiceId: 'eve',
     keepScreenOnDuringRun: true,
     offRouteMeters: 45,
     athleteNotes: '',
@@ -39,6 +42,8 @@ function migrateProfile(raw: Partial<GuestProfile> | null): GuestProfile {
     voiceCoach: raw.voiceCoach ?? true,
     voiceTurns: raw.voiceTurns ?? true,
     voiceRate: raw.voiceRate ?? 1.05,
+    aiVoice: raw.aiVoice ?? false,
+    aiVoiceId: raw.aiVoiceId ?? 'eve',
     keepScreenOnDuringRun: raw.keepScreenOnDuringRun ?? true,
     offRouteMeters: raw.offRouteMeters ?? 45,
     athleteNotes: raw.athleteNotes ?? '',
@@ -56,9 +61,17 @@ export const useGuestStore = defineStore('guest', () => {
     migrateProfile(loadJson<Partial<GuestProfile> | null>(STORAGE_KEY, null)),
   )
 
+  configureVoice({
+    aiVoice: profile.value.aiVoice,
+    voiceId: profile.value.aiVoiceId,
+  })
+
   watch(
     profile,
-    (p) => saveJson(STORAGE_KEY, p),
+    (p) => {
+      saveJson(STORAGE_KEY, p)
+      configureVoice({ aiVoice: p.aiVoice, voiceId: p.aiVoiceId })
+    },
     { deep: true },
   )
 
@@ -94,6 +107,19 @@ export const useGuestStore = defineStore('guest', () => {
 
   function setVoiceRate(rate: number) {
     profile.value.voiceRate = Math.min(2, Math.max(0.5, rate))
+  }
+
+  function setAiVoice(on: boolean) {
+    profile.value.aiVoice = on
+    configureVoice({ aiVoice: on, voiceId: profile.value.aiVoiceId })
+  }
+
+  function setAiVoiceId(id: string) {
+    profile.value.aiVoiceId = id.trim().toLowerCase() || 'eve'
+    configureVoice({
+      aiVoice: profile.value.aiVoice,
+      voiceId: profile.value.aiVoiceId,
+    })
   }
 
   function setKeepScreenOnDuringRun(on: boolean) {
@@ -143,6 +169,8 @@ export const useGuestStore = defineStore('guest', () => {
     setVoiceCoach,
     setVoiceTurns,
     setVoiceRate,
+    setAiVoice,
+    setAiVoiceId,
     setKeepScreenOnDuringRun,
     setOffRouteMeters,
     setAthleteNotes,

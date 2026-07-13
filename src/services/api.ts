@@ -38,6 +38,8 @@ export async function apiFetch<T>(
 export interface ApiHealth {
   ok: boolean
   xai: boolean
+  /** Grok TTS available (same key as xAI today) */
+  tts?: boolean
   ors: boolean
   model: string
 }

@@ -5,6 +5,7 @@ import { isPocketBaseConfigured } from '@/services/pocketbase'
 import { ai } from '@/services/ai'
 import { fetchHealth, type ApiHealth } from '@/services/api'
 import {
+  AI_VOICE_OPTIONS,
   isSpeechSupported,
   speak,
   unlockSpeech,
@@ -52,9 +53,16 @@ async function testLocation() {
 function testVoice() {
   unlockSpeech()
   warmVoices()
-  speak('Loop coach ready. Hold this pace.', {
-    rate: guest.profile.voiceRate,
-  })
+  speak(
+    guest.profile.aiVoice
+      ? 'Loop AI coach ready. Hold this pace.'
+      : 'Loop coach ready. Hold this pace.',
+    {
+      rate: guest.profile.voiceRate,
+      ai: guest.profile.aiVoice,
+      voiceId: guest.profile.aiVoiceId,
+    },
+  )
 }
 </script>
 
@@ -248,9 +256,8 @@ function testVoice() {
     <div class="card stack">
       <div class="card-title">Voice coach</div>
       <p class="muted small" style="margin: 0">
-        Free browser speech (Web Speech API).
+        Default is free browser speech. Optional AI voice uses Grok TTS (~$15 / 1M chars).
         <template v-if="!speechOk"> Not supported in this browser.</template>
-        Upgrade path: <code>docs/VOICE.md</code>.
       </p>
 
       <div class="row" style="justify-content: space-between">
@@ -270,6 +277,49 @@ function testVoice() {
             @click="guest.setVoiceEnabled(false)"
           >
             Off
+          </button>
+        </div>
+      </div>
+
+      <div class="row" style="justify-content: space-between">
+        <span class="small">AI voice</span>
+        <div class="seg">
+          <button
+            type="button"
+            :class="{ active: guest.profile.aiVoice }"
+            :disabled="!guest.profile.voiceEnabled || (health != null && health.tts === false)"
+            @click="guest.setAiVoice(true)"
+          >
+            On
+          </button>
+          <button
+            type="button"
+            :class="{ active: !guest.profile.aiVoice }"
+            :disabled="!guest.profile.voiceEnabled"
+            @click="guest.setAiVoice(false)"
+          >
+            Off
+          </button>
+        </div>
+      </div>
+      <p class="muted small" style="margin: 0">
+        Off = browser synth (free). On = Grok neural voice via server.
+        <template v-if="health && !health.tts && !health.xai">
+          Needs <code>XAI_API_KEY</code> on the API.
+        </template>
+      </p>
+
+      <div v-if="guest.profile.aiVoice" class="field">
+        <label>AI voice character</label>
+        <div class="seg" style="flex-wrap: wrap">
+          <button
+            v-for="v in AI_VOICE_OPTIONS"
+            :key="v.id"
+            type="button"
+            :class="{ active: guest.profile.aiVoiceId === v.id }"
+            @click="guest.setAiVoiceId(v.id)"
+          >
+            {{ v.label }}
           </button>
         </div>
       </div>
@@ -350,6 +400,7 @@ function testVoice() {
         <p class="small success" style="margin: 0.35rem 0 0">API online</p>
         <p class="small muted" style="margin: 0.25rem 0 0">
           xAI: <strong>{{ health.xai ? 'key set' : 'missing XAI_API_KEY' }}</strong>
+          · TTS: <strong>{{ (health.tts ?? health.xai) ? 'ready' : 'off' }}</strong>
           · model {{ health.model }}
         </p>
         <p class="small muted" style="margin: 0.25rem 0 0">

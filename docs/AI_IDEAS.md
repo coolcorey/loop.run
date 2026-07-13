@@ -86,4 +86,10 @@ Prefer **local templates** for high-frequency cues (splits, milestones); reserve
 
 ## Routing quality (related)
 
-Loop planning should prefer **true loops** and **avoid out-and-back / doubling back** on the same road. Server scoring uses corridor reuse (same street later), heading reversals, and angular thinness; waypoints sit on a ring with the start on the circumference (not a star from the origin).
+Loop planning prefers **true loops** and **avoids out-and-back / switchbacks**:
+
+1. **ORS `round_trip`** (primary) — circuit-oriented generator with multiple seeds / point counts  
+2. **Ring vias** (fallback) — start on circumference, shortest-path through vias  
+3. **Hard prefer** low corridor-reuse score; accept threshold ~0.22; more retries before giving up  
+
+Scoring: corridor reuse (same street later), heading reversals, angular thinness.

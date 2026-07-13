@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { loadEnvFile, env } from './env.js'
 import { distanceForCalories } from './geo.js'
 import { planRoadLoop } from './routing.js'
-import { parseJsonLoose, xaiChat, xaiConfigured, XaiError } from './xai.js'
+import { parseJsonLoose, xaiChat, xaiConfigured, xaiTts, XaiError } from './xai.js'
 
 function voiceModeAddon(mode?: string): string {
   switch (mode) {
@@ -59,10 +59,55 @@ app.get('/api/health', (c) =>
   c.json({
     ok: true,
     xai: xaiConfigured(),
+    tts: xaiConfigured(),
     ors: Boolean(env('ORS_API_KEY')),
     model: env('XAI_MODEL', 'grok-4.3'),
   }),
 )
+
+/**
+ * Proxy Grok TTS — keeps XAI_API_KEY server-side.
+ * Body: { text, voiceId?, speed? } → audio/mpeg
+ */
+app.post('/api/tts', async (c) => {
+  try {
+    if (!xaiConfigured()) {
+      return c.json(
+        { error: 'XAI_API_KEY not configured', code: 'NO_XAI' },
+        503,
+      )
+    }
+    const body = await c.req.json<{
+      text?: string
+      voiceId?: string
+      voice_id?: string
+      speed?: number
+    }>()
+    const text = (body.text || '').trim()
+    if (!text) return c.json({ error: 'text required' }, 400)
+
+    const { bytes, contentType } = await xaiTts({
+      text,
+      voiceId: body.voiceId || body.voice_id || env('XAI_TTS_VOICE', 'eve'),
+      speed: body.speed,
+      language: 'en',
+    })
+
+    return new Response(bytes, {
+      status: 200,
+      headers: {
+        'Content-Type': contentType.includes('json') ? 'audio/mpeg' : contentType,
+        'Cache-Control': 'private, max-age=600',
+      },
+    })
+  } catch (e) {
+    const status = e instanceof XaiError && e.status ? e.status : 500
+    return c.json(
+      { error: e instanceof Error ? e.message : 'TTS failed' },
+      status >= 400 && status < 600 ? status : 500,
+    )
+  }
+})
 
 app.post('/api/route/loop', async (c) => {
   try {
@@ -163,6 +208,9 @@ app.post('/api/route/loop', async (c) => {
             preferences: loopPrefs,
             turnCount: loop.turns.length,
             provider: loop.provider,
+            strategy: loop.strategy,
+            outAndBack: loop.outAndBack,
+            trueCircuit: (loop.outAndBack ?? 1) < 0.22,
             regenerate: Boolean(body.regenerate),
           }),
           json: true,
@@ -202,6 +250,7 @@ app.post('/api/route/loop', async (c) => {
       provider: loop.provider,
       durationSeconds: loop.durationSeconds,
       outAndBack: loop.outAndBack,
+      strategy: loop.strategy,
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Route planning failed'

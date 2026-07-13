@@ -111,6 +111,22 @@ function trailGeoJson(trail: GeoPoint[]): FeatureCollection {
   return { type: 'FeatureCollection', features }
 }
 
+/**
+ * Chevron rotation in geographic degrees from north (icon-rotation-alignment: map).
+ * Always matches travel heading so the tip points where you're going.
+ *
+ * - North-up: map bearing 0 → arrow turns on a fixed north map.
+ * - Heading-up: map bearing = heading → arrow still points "forward", which
+ *   is the top of the screen because the whole map rotated with you.
+ *
+ * Never use 0 for "points up" with map alignment — 0 means geographic north,
+ * so the arrow would point north while only the map spun (or vice versa).
+ */
+function chevronBearing(heading: number | null): number {
+  if (heading == null || !Number.isFinite(heading)) return 0
+  return heading
+}
+
 function userGeoJson(
   user: GeoPoint | null,
   heading: number | null,
@@ -122,7 +138,7 @@ function userGeoJson(
           {
             type: 'Feature',
             properties: {
-              bearing: props.headingUp ? 0 : (heading ?? 0),
+              bearing: chevronBearing(heading),
               accuracy: user.accuracy ?? 0,
             },
             geometry: {
@@ -334,14 +350,24 @@ function syncOverview() {
   map.easeTo({ bearing: 0, duration: 300 })
 }
 
+function targetMapBearing(): number {
+  // Heading-up = rotate the *map* so course is toward the top of the screen
+  if (
+    props.headingUp &&
+    props.heading != null &&
+    Number.isFinite(props.heading)
+  ) {
+    return props.heading
+  }
+  // North-up = map stays with north at the top
+  return 0
+}
+
 function syncFollow(force = false) {
   if (!map || !props.user) return
   if (userInteracting && !force) return
 
-  const bearing =
-    props.headingUp && props.heading != null && Number.isFinite(props.heading)
-      ? props.heading
-      : 0
+  const bearing = targetMapBearing()
 
   const zoom = followReady
     ? Math.max(map.getZoom(), FOLLOW_ZOOM - 0.5)
@@ -351,14 +377,15 @@ function syncFollow(force = false) {
     center: [props.user.lng, props.user.lat],
     zoom,
     bearing,
-    duration: followReady ? 350 : 0,
+    // Jump when forcing (mode toggle); smooth when tracking
+    duration: force ? 280 : followReady ? 350 : 0,
     essential: true,
     easing: (t) => t * (2 - t),
   })
   followReady = true
 }
 
-function syncData() {
+function syncData(opts: { forceFollow?: boolean } = {}) {
   if (!map) return
   const route = map.getSource('route') as GeoJSONSource | undefined
   const trail = map.getSource('trail') as GeoJSONSource | undefined
@@ -387,7 +414,7 @@ function syncData() {
   }
 
   if (props.mode === 'follow' && props.user) {
-    syncFollow()
+    syncFollow(Boolean(opts.forceFollow))
   } else if (props.mode === 'overview') {
     followReady = false
     userInteracting = false
@@ -439,23 +466,31 @@ onMounted(() => {
   })
 })
 
+// Position / trail / path — normal follow (respects pan pause)
 watch(
-  () =>
-    [
-      props.path,
-      props.user,
-      props.trail,
-      props.heading,
-      props.mode,
-      props.headingUp,
-      props.highContrastPath,
-    ] as const,
+  () => [props.path, props.user, props.trail, props.heading, props.highContrastPath] as const,
   () => {
     if (!map?.isStyleLoaded()) return
     ensureLayers()
     syncData()
   },
   { deep: true },
+)
+
+// Heading-up ↔ north-up or mode change: always re-orient the map camera
+watch(
+  () => [props.headingUp, props.mode] as const,
+  () => {
+    if (!map?.isStyleLoaded()) return
+    // Don't leave the map stuck if the user recently panned
+    userInteracting = false
+    if (resumeFollowTimer) {
+      clearTimeout(resumeFollowTimer)
+      resumeFollowTimer = null
+    }
+    ensureLayers()
+    syncData({ forceFollow: true })
+  },
 )
 
 onBeforeUnmount(() => {

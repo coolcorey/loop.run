@@ -209,6 +209,13 @@ export interface GuestProfile {
   /** Speech rate 0.5–2 */
   voiceRate: number
   /**
+   * Use Grok AI TTS instead of browser synth.
+   * Default off (free browser voice). Costs xAI TTS when on.
+   */
+  aiVoice: boolean
+  /** Grok TTS voice id: eve | ara | leo | rex | sal */
+  aiVoiceId: string
+  /**
    * Keep the screen on during an active run (Screen Wake Lock).
    * Helps GPS + speaker stay reliable; uses more battery.
    */

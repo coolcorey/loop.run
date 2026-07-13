@@ -130,9 +130,10 @@ export function corridorReuseScore(
   opts?: { sampleEveryM?: number; minAlongM?: number; nearM?: number },
 ): number {
   if (path.length < 8) return 0
-  const sampleEveryM = opts?.sampleEveryM ?? 45
-  const minAlongM = opts?.minAlongM ?? 160
-  const nearM = opts?.nearM ?? 42
+  // Tighter defaults catch “same sidewalk twice” switchbacks better
+  const sampleEveryM = opts?.sampleEveryM ?? 35
+  const minAlongM = opts?.minAlongM ?? 120
+  const nearM = opts?.nearM ?? 35
 
   const samples: { p: Point; d: number }[] = [{ p: path[0]!, d: 0 }]
   let acc = 0
