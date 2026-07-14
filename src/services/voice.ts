@@ -3,6 +3,10 @@
  * - Default: free browser Web Speech API (SpeechSynthesis)
  * - Optional: Grok AI TTS via POST /api/tts (Settings → AI voice, default off)
  *
+ * AI cues play through Web Audio (not HTMLMediaElement) and request a
+ * transient audio session so background music is ducked/mixed, not stopped.
+ * Browser synth already behaves that way on most OS/browsers.
+ *
  * See docs/VOICE.md
  */
 
@@ -45,24 +49,27 @@ export function isAiVoicePreferred(): boolean {
   return preferAi
 }
 
-let focusAudio: HTMLAudioElement | null = null
 let audioCtx: AudioContext | null = null
-let currentAiAudio: HTMLAudioElement | null = null
+let currentSource: AudioBufferSourceNode | null = null
 let speakGeneration = 0
 
-/** Session cache: voiceId|speed|text → object URL */
-const aiCache = new Map<string, string>()
+/** Session cache: voiceId|speed|text → raw MP3 bytes */
+const aiCache = new Map<string, ArrayBuffer>()
 const AI_CACHE_MAX = 48
 
 export function isBrowserSpeechSupported(): boolean {
   return typeof window !== 'undefined' && 'speechSynthesis' in window
 }
 
-/** Browser speech or HTML Audio (for AI TTS) */
+/** Browser speech or Web Audio (for AI TTS) */
 export function isSpeechSupported(): boolean {
   return (
     isBrowserSpeechSupported() ||
-    (typeof window !== 'undefined' && typeof Audio !== 'undefined')
+    (typeof window !== 'undefined' &&
+      (typeof AudioContext !== 'undefined' ||
+        typeof (
+          window as unknown as { webkitAudioContext?: unknown }
+        ).webkitAudioContext !== 'undefined'))
   )
 }
 
@@ -75,82 +82,91 @@ export function warmVoices(): void {
   }
 }
 
-/**
- * Tiny silent WAV — used to poke the audio session / focus on mobile.
- */
-function ensureFocusAudio(): HTMLAudioElement {
-  if (focusAudio) return focusAudio
-  const wav =
-    'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA='
-  const a = new Audio(wav)
-  a.loop = false
-  a.volume = 0.01
-  a.setAttribute('playsinline', 'true')
-  focusAudio = a
-  return a
-}
+type AudioSessionType =
+  | 'auto'
+  | 'playback'
+  | 'transient'
+  | 'transient-solo'
+  | 'ambient'
 
-async function claimAudioFocus(): Promise<void> {
+/**
+ * Prefer mix-friendly session so coach cues don't kill Spotify etc.
+ * - transient: short cue, may duck music (best for coach lines)
+ * - ambient: mix without taking over (fallback)
+ * Never use "playback" for AI TTS — that pauses other media.
+ */
+function setAudioSession(type: AudioSessionType): void {
   try {
     const nav = navigator as Navigator & {
       audioSession?: { type: string }
     }
     if (nav.audioSession) {
-      nav.audioSession.type = 'transient'
+      nav.audioSession.type = type
     }
   } catch {
     // ignore
   }
+}
 
-  try {
-    if (!audioCtx) {
-      const Ctx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext })
-          .webkitAudioContext
-      if (Ctx) audioCtx = new Ctx()
-    }
-    if (audioCtx?.state === 'suspended') {
-      await audioCtx.resume()
-    }
-  } catch {
-    // ignore
+function getAudioContextCtor(): typeof AudioContext | null {
+  if (typeof window === 'undefined') return null
+  return (
+    window.AudioContext ||
+    (
+      window as unknown as { webkitAudioContext?: typeof AudioContext }
+    ).webkitAudioContext ||
+    null
+  )
+}
+
+async function ensureAudioCtx(): Promise<AudioContext> {
+  const Ctor = getAudioContextCtor()
+  if (!Ctor) throw new Error('Web Audio unavailable')
+  if (!audioCtx) {
+    audioCtx = new Ctor()
   }
+  if (audioCtx.state === 'suspended') {
+    await audioCtx.resume()
+  }
+  return audioCtx
+}
 
-  try {
-    const a = ensureFocusAudio()
-    a.currentTime = 0
-    await a.play()
-    window.setTimeout(() => {
-      try {
-        a.pause()
-      } catch {
-        /* */
-      }
-    }, 80)
-  } catch {
-    // autoplay rules
+function stopAiWebAudio(): void {
+  if (currentSource) {
+    try {
+      currentSource.onended = null
+      currentSource.stop()
+    } catch {
+      /* already stopped */
+    }
+    try {
+      currentSource.disconnect()
+    } catch {
+      /* */
+    }
+    currentSource = null
   }
 }
 
 /**
  * Call once from a user gesture (e.g. Start run) so mobile browsers allow audio.
+ * Does not play HTML media (that can pause background music).
  */
 export function unlockSpeech(): void {
   try {
-    void claimAudioFocus()
+    setAudioSession('transient')
+    const Ctor = getAudioContextCtor()
+    if (Ctor) {
+      if (!audioCtx) audioCtx = new Ctor()
+      void audioCtx.resume()
+    }
     if (isBrowserSpeechSupported()) {
       window.speechSynthesis.cancel()
       const u = new SpeechSynthesisUtterance(' ')
-      u.volume = 1
+      u.volume = 0.01
       u.rate = 2
       window.speechSynthesis.speak(u)
       window.speechSynthesis.cancel()
-    }
-    // Prime AI path Audio element
-    if (!currentAiAudio) {
-      currentAiAudio = new Audio()
-      currentAiAudio.setAttribute('playsinline', 'true')
     }
   } catch {
     // ignore
@@ -166,15 +182,7 @@ export function stopSpeaking(): void {
       /* */
     }
   }
-  if (currentAiAudio) {
-    try {
-      currentAiAudio.pause()
-      currentAiAudio.removeAttribute('src')
-      currentAiAudio.load()
-    } catch {
-      /* */
-    }
-  }
+  stopAiWebAudio()
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -185,24 +193,20 @@ function cacheKey(voiceId: string, speed: number, text: string): string {
   return `${voiceId}|${speed.toFixed(2)}|${text}`
 }
 
-function rememberCache(key: string, url: string): void {
+function rememberCache(key: string, bytes: ArrayBuffer): void {
   if (aiCache.has(key)) return
   if (aiCache.size >= AI_CACHE_MAX) {
     const first = aiCache.keys().next().value
-    if (first) {
-      const old = aiCache.get(first)
-      aiCache.delete(first)
-      if (old) URL.revokeObjectURL(old)
-    }
+    if (first) aiCache.delete(first)
   }
-  aiCache.set(key, url)
+  aiCache.set(key, bytes)
 }
 
-async function fetchAiAudio(
+async function fetchAiBytes(
   text: string,
   voiceId: string,
   speed: number,
-): Promise<string> {
+): Promise<ArrayBuffer> {
   const key = cacheKey(voiceId, speed, text)
   const hit = aiCache.get(key)
   if (hit) return hit
@@ -219,41 +223,108 @@ async function fetchAiAudio(
     signal: AbortSignal.timeout(25_000),
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({})) as { error?: string; code?: string }
+    const err = (await res.json().catch(() => ({}))) as {
+      error?: string
+      code?: string
+    }
     throw new Error(err.error || `TTS ${res.status}`)
   }
-  const blob = await res.blob()
-  const objectUrl = URL.createObjectURL(blob)
-  rememberCache(key, objectUrl)
-  return objectUrl
+  const bytes = await res.arrayBuffer()
+  rememberCache(key, bytes)
+  return bytes
 }
 
+/**
+ * Play AI TTS via Web Audio so we don't take HTMLMediaElement "music" focus.
+ * decodeAudioData detaches the buffer — always pass a copy.
+ */
 async function speakAi(text: string, options: SpeakOptions): Promise<void> {
   const gen = speakGeneration
   const rate = clamp(options.rate ?? 1, 0.7, 1.5)
   const voiceId = (options.voiceId || defaultVoiceId || 'eve').toLowerCase()
   const volume = clamp(options.volume ?? 1, 0, 1)
 
-  await claimAudioFocus()
+  // Duck / mix — do not claim playback focus
+  setAudioSession('transient')
+
+  const bytes = await fetchAiBytes(text, voiceId, rate)
   if (gen !== speakGeneration) return
 
-  const src = await fetchAiAudio(text, voiceId, rate)
+  const ctx = await ensureAudioCtx()
   if (gen !== speakGeneration) return
 
-  if (!currentAiAudio) {
-    currentAiAudio = new Audio()
-    currentAiAudio.setAttribute('playsinline', 'true')
-  }
-  const audio = currentAiAudio
-  audio.pause()
-  audio.volume = volume
-  // playbackRate only if we want extra speed beyond server; server already got speed
-  audio.playbackRate = 1
-  audio.src = src
+  let decoded: AudioBuffer
   try {
+    decoded = await ctx.decodeAudioData(bytes.slice(0))
+  } catch {
+    // Rare decode failure — last resort HTMLAudio with transient session
+    await speakAiHtmlFallback(bytes, volume, gen, text, options)
+    return
+  }
+  if (gen !== speakGeneration) return
+
+  stopAiWebAudio()
+
+  const gain = ctx.createGain()
+  gain.gain.value = volume
+  gain.connect(ctx.destination)
+
+  const source = ctx.createBufferSource()
+  source.buffer = decoded
+  source.connect(gain)
+  currentSource = source
+
+  source.onended = () => {
+    if (currentSource === source) currentSource = null
+    try {
+      source.disconnect()
+      gain.disconnect()
+    } catch {
+      /* */
+    }
+    // Release transient claim so music stays primary
+    setAudioSession('auto')
+  }
+
+  try {
+    source.start(0)
+  } catch {
+    if (gen === speakGeneration) speakBrowser(text, options)
+  }
+}
+
+/** Only if Web Audio decode fails — still force transient session. */
+async function speakAiHtmlFallback(
+  bytes: ArrayBuffer,
+  volume: number,
+  gen: number,
+  text: string,
+  options: SpeakOptions,
+): Promise<void> {
+  setAudioSession('transient')
+  const blob = new Blob([bytes], { type: 'audio/mpeg' })
+  const url = URL.createObjectURL(blob)
+  const audio = new Audio()
+  audio.setAttribute('playsinline', 'true')
+  // Hint: not a full media playback session where supported
+  ;(audio as HTMLAudioElement & { disableRemotePlayback?: boolean }).disableRemotePlayback =
+    true
+  audio.volume = volume
+  audio.src = url
+  const cleanup = () => {
+    URL.revokeObjectURL(url)
+    setAudioSession('auto')
+  }
+  audio.addEventListener('ended', cleanup)
+  audio.addEventListener('error', cleanup)
+  try {
+    if (gen !== speakGeneration) {
+      cleanup()
+      return
+    }
     await audio.play()
   } catch {
-    // fall back to browser if AI play fails
+    cleanup()
     if (gen === speakGeneration) speakBrowser(text, options)
   }
 }
@@ -269,10 +340,15 @@ function speakBrowser(text: string, options: SpeakOptions): boolean {
     interrupt = true,
   } = options
 
-  void claimAudioFocus()
+  // Synth path — don't poke HTML media focus
+  setAudioSession('transient')
 
   if (interrupt) {
-    window.speechSynthesis.cancel()
+    try {
+      window.speechSynthesis.cancel()
+    } catch {
+      /* */
+    }
   }
 
   const u = new SpeechSynthesisUtterance(text)

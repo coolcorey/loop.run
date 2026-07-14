@@ -26,9 +26,13 @@ Loop speaks **coach nudges** and **turn cues** during a run.
 Uses the same server key as chat (`XAI_API_KEY`). Client never sees the key.
 
 ```
-coach text → speak() → POST /api/tts → Grok /v1/tts → MP3 → <audio>
+coach text → speak() → POST /api/tts → Grok /v1/tts → MP3 → Web Audio
                  ↘ (fail) browser SpeechSynthesis
 ```
+
+**Music:** AI cues use Web Audio + a `transient` audio session (not HTML
+`<audio>` media playback) so background music should duck/mix instead of
+stopping — closer to browser synth behavior. OS/browser still vary.
 
 | Piece | Role |
 |-------|------|
